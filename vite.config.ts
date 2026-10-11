@@ -10,13 +10,24 @@ export default defineConfig(({mode}) => {
     env.GEMINI_API_KEY_1 ||
     env.VITE_GEMINI_API_KEY ||
     env.GEMINI_API_KEY ||
+    env.GOOGLE_API_KEY ||
+    env.API_KEY ||
+    process.env.VITE_GEMINI_API_KEY_1 ||
     process.env.GEMINI_API_KEY_1 ||
+    process.env.VITE_GEMINI_API_KEY ||
     process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.API_KEY ||
     '';
   const rawK2 =
     env.VITE_GEMINI_API_KEY_2 ||
     env.GEMINI_API_KEY_2 ||
+    env.GOOGLE_API_KEY_2 ||
+    env.API_KEY_2 ||
+    process.env.VITE_GEMINI_API_KEY_2 ||
     process.env.GEMINI_API_KEY_2 ||
+    process.env.GOOGLE_API_KEY_2 ||
+    process.env.API_KEY_2 ||
     '';
   const cleanKey = (k: string) => (k && k.trim() !== 'MY_GEMINI_API_KEY' ? k.trim() : '');
 
