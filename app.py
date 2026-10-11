@@ -21,8 +21,15 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "auto")
 
 _BASE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
 DIST_DIR = os.path.join(_BASE, "dist")
-OUTPUT_DIR = os.path.join(_BASE, ".data")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUTPUT_DIR = os.path.join("/tmp", ".data") if os.environ.get("VERCEL") else os.path.join(_BASE, ".data")
+try:
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+except Exception:
+    OUTPUT_DIR = os.path.join("/tmp", ".data")
+    try:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+    except Exception:
+        pass
 
 ROLES = ["hook", "body", "climax", "closing"]
 FALLBACKS = ["kinetic", "burst", "tunnel", "grid", "orbit", "cube"]
@@ -238,13 +245,23 @@ def clean_plan(plan, rng):
         if not isinstance(s, dict):
             continue
         role = s.get("role") if s.get("role") in ROLES else "body"
-        scenes.append({"role": role, "text": str(s.get("text", "") or "MOTION")[:40],
-                       "sub": str(s.get("sub", "") or "")[:60], "idea": str(s.get("idea", "") or "")[:300],
+        text = str(s.get("text", "") or "MOTION").strip()[:46]
+        sub = str(s.get("sub", "") or "").strip()[:110]
+        narration = str(s.get("narration", "") or "").strip()[:180]
+        if not sub:
+            sub = narration[:110] if narration else "Experiência visual em movimento contínuo"
+        narration = f"{text}. {sub}"
+        scenes.append({"role": role, "text": text,
+                       "sub": sub, "narration": narration,
+                       "idea": str(s.get("idea", "") or "")[:300],
+                       "layout_mode": str(s.get("layout_mode", "") or "autoral")[:80],
+                       "camera_motion": str(s.get("camera_motion", "") or "dinamica")[:80],
+                       "visual_bridge": str(s.get("visual_bridge", "") or "")[:180],
                        "weight": s.get("weight", 1)})
     if not scenes:
-        scenes = [{"role": "hook", "text": "MOTION", "sub": "", "idea": "", "weight": 1}]
+        scenes = [{"role": "hook", "text": "MOTION", "sub": "Abertura sincronizada", "narration": "MOTION. Abertura sincronizada.", "idea": "", "weight": 1}]
     if len(scenes) == 1:
-        scenes.append({"role": "closing", "text": "FIM", "sub": "", "idea": "", "weight": 1})
+        scenes.append({"role": "closing", "text": "FIM", "sub": "Assinatura final", "narration": "FIM. Assinatura final.", "idea": "", "weight": 1})
     scenes[0]["role"] = "hook"
     for s in scenes[1:-1]:
         if s["role"] in ("hook", "closing"):
@@ -350,36 +367,47 @@ class RenderServerHandler(BaseHTTPRequestHandler):
             duration = float(body.get("duration") or 30)
             width = int(body.get("width") or 720)
             height = int(body.get("height") or 1280)
-            reaproveitar = float(body.get("reaproveitar") if body.get("reaproveitar") is not None else 0.25)
+            reaproveitar = float(body.get("reaproveitar") if body.get("reaproveitar") is not None else 0.0)
             rng = random.Random(int.from_bytes(os.urandom(4), "big"))
             runs = ler_json("historico_planos.json", {"runs": []}).get("runs", [])
             dna = make_dna(rng, runs)
-            logs = ["DNA: estilo=%s | estrutura=%s | transição=%s | bpm=%d | energia=%d" %
-                    (dna["estilo"], dna["structure"], dna["transition"], dna["bpm"], dna["energy"])]
+            dna["client_intent"] = user_prompt
+            dna["narrative_thread"] = f"Jornada visual contínua inspirada em '{user_prompt}'"
+            dna["visual_motifs"] = ["geometria viva", "tipografia expressiva", "profundidade dinâmica"]
+            logs = []
             chaves = extrair_chaves(body.get("key1", ""), body.get("key2", ""))
             tem_chave = bool(chaves)
             modelos = ["gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-2.5-flash"]
             mi_box = [0]
             plan = None
             if tem_chave:
-                logs.append("Chaves Gemini em uso: %d (as cenas alternam entre elas)" % len(chaves))
+                logs.append("Chaves Gemini em uso: %d (Agente 1 = Chave 1 | Agente 2 = Chave 2)" % len(chaves))
                 modelos, mlogs = preparar_modelos(chaves, body.get("geminiModel", "auto"))
                 logs.extend(mlogs)
-                evitar = "; ".join(str(r.get("title", "")) for r in runs[-3:]) or "nenhum"
-                p = f"""Você é um diretor de motion design sênior e roteirista de showreels.
-Crie o roteiro de um showreel vertical (9:16) de {int(duration)} segundos para o pedido abaixo.
-Estilo visual obrigatório: {dna['estilo']} - {dna['estilo_desc']}.
-Estrutura: {dna['structure']}. Energia {dna['energy']}/5. BPM {dna['bpm']}.
-Regras: gancho forte na 1ª cena; alterne respiro e explosão; clímax perto do fim; a última cena é o card final.
-Use de 7 a 9 cenas. Cada cena tem:
-- "role": hook, body, climax ou closing (closing só na última)
-- "text": texto principal CURTO em português (máx. 5 palavras, impactante)
-- "sub": subtítulo opcional (máx. 8 palavras)
-- "idea": descrição visual ESPECÍFICA e diferente das outras (formas, movimento, câmera, 1-2 frases)
-- "weight": 1 a 3 (duração relativa)
-Evite repetir estes títulos recentes: {evitar}.
-Responda APENAS com JSON: {{"title":"...","scenes":[{{"role":"hook","text":"...","sub":"...","idea":"...","weight":2}}]}}
-PEDIDO: {user_prompt}"""
+                evitar = "; ".join(str(r.get("title", "")) for r in runs[-4:]) or "nenhum"
+                p = f"""Você é um Diretor Criativo de Motion Design de classe mundial.
+Analise profundamente o PEDIDO DO CLIENTE abaixo e crie uma direção de arte 100% ORIGINAL, SEM USAR TEMPLATES PADRÃO, onde o universo visual, a paleta de cores, a narrativa, os layouts e as transições nasçam exclusivamente do que o cliente pediu.
+
+PEDIDO DO CLIENTE: "{user_prompt}"
+Duração total: {int(duration)} segundos (formato vertical 9:16, {width}x{height}).
+Evite repetir títulos recentes: {evitar}.
+
+REGRAS DE DIREÇÃO CRIATIVA E CONEXÃO PROFUNDA:
+1. NADA DE ESTRUTURA GENÉRICA: Entenda o produto, tema, emoção ou história do cliente. Crie um "narrative_thread" (fio condutor) que conte uma história contínua da Cena 1 até a última cena.
+2. DIREÇÃO DE ARTE E PALETA SOB MEDIDA:
+   - Defina "estilo" e "estilo_desc" exclusivos para este projeto.
+   - Escolha uma paleta hexadecimal "pal" ({{bg1, bg2, acc, acc2, fg, dim}}) que represente psicologicamente o pedido do cliente.
+   - Escolha "bpm" (75 a 155), "energy" (1 a 5), "structure" ("crescendo", "explosao_respiro" ou "uniforme") e "transition" ("zoom", "wipe_h", "wipe_v", "crossfade", "glitch" ou "flash").
+3. ARQUITETURA DE LAYOUT VARIADA E CONEXÃO ENTRE CENAS (6 a 8 cenas):
+   - PROIBIDO repetir o mesmo layout ou posicionamento de texto em cenas seguidas!
+   - Cada cena DEVE ter um "layout_mode" diferente, "camera_motion", "visual_bridge" e "transition_out".
+4. VOZ NARRADORA + ESCRITA 100% NA TELA (REGRA CRÍTICA):
+   - O vídeo terá uma VOZ NARRANDO tudo que passa na tela!
+   - OBSERVAÇÃO OBRIGATÓRIA: PRATICAMENTE TUDO QUE FOR FALADO NA VOZ TEM QUE APARECER DE ESCRITA NA TELA!
+   - Em cada cena, "text" é o impacto inicial falado (2 a 4 palavras), "sub" é a continuação exata falada (5 a 10 palavras) e "narration" é "text. sub".
+
+Responda APENAS com JSON:
+{{"title":"...","client_intent":"...","narrative_thread":"...","visual_motifs":["..."],"estilo":"...","estilo_desc":"...","bpm":120,"energy":4,"structure":"crescendo","transition":"zoom","pal":{{"bg1":"#0a0806","bg2":"#1f1610","acc":"#ff6b00","acc2":"#ffd166","fg":"#fff8f0","dim":"#b8a696"}},"scenes":[{{"role":"hook","text":"FRASE PRINCIPAL","sub":"continuação falada","narration":"FRASE PRINCIPAL. continuação falada.","idea":"...","layout_mode":"...","camera_motion":"...","visual_bridge":"...","transition_out":"zoom","weight":2}}]}}"""
                 txt, glogs = gemini_call(p, chaves, modelos, mi_box, json_mode=True, temperature=1.0, chave=0)
                 logs.extend(glogs)
                 if txt:
@@ -390,11 +418,23 @@ PEDIDO: {user_prompt}"""
                         parsed = json.loads(txt)
                         if isinstance(parsed, dict) and parsed.get("scenes"):
                             plan = parsed
+                            if parsed.get("estilo"):
+                                dna["estilo"] = str(parsed["estilo"])[:80]
+                            if parsed.get("estilo_desc"):
+                                dna["estilo_desc"] = str(parsed["estilo_desc"])[:240]
+                            if parsed.get("narrative_thread"):
+                                dna["narrative_thread"] = str(parsed["narrative_thread"])[:300]
+                            if isinstance(parsed.get("pal"), dict):
+                                for k in ("bg1", "bg2", "acc", "acc2", "fg", "dim"):
+                                    val = str(parsed["pal"].get(k, "")).strip()
+                                    if re.match(r"^#[0-9a-fA-F]{6}$", val):
+                                        dna["pal"][k] = val
                     except Exception as ex:
                         logs.append("  Roteiro inválido: %s" % ex)
             if plan is None:
-                logs.append("Modo offline (cenas prontas)." if not tem_chave else "Gemini falhou no roteiro - usando roteiro offline.")
+                logs.append("Modo offline (cenas conectadas)." if not tem_chave else "Gemini falhou no roteiro - usando roteiro offline.")
                 plan = offline_plan(user_prompt, rng)
+            logs.append("Direção Criativa: %s | Fio Condutor: %s" % (dna["estilo"], dna.get("narrative_thread", "")))
             plan = clean_plan(plan, rng)
             scenes = plan["scenes"]
             biblioteca = ler_json("biblioteca_cenas.json", [])
@@ -406,13 +446,13 @@ PEDIDO: {user_prompt}"""
                 s["seed"] = rng.randint(1, 10 ** 6)
                 s["code"], s["origem"] = None, "fallback"
                 reuso = [e for e in biblioteca if e.get("role") == s["role"]]
-                if reuso and rng.random() < reaproveitar:
+                if reaproveitar > 0 and reuso and rng.random() < reaproveitar:
                     e = rng.choice(reuso)
                     s["code"], s["origem"], s["status"] = e["code"], "biblioteca", "ready"
                     logs.append("  cena %d/%d [%s] reaproveitada da biblioteca" % (i + 1, len(scenes), s["role"]))
                 else:
                     s["status"] = "compiling" if tem_chave else "ready"
-            logs.append("Roteiro '%s': %d cenas" % (plan["title"], len(scenes)))
+            logs.append("Roteiro '%s': %d cenas conectadas" % (plan["title"], len(scenes)))
             runs.append({"title": plan["title"], "structure": dna["structure"], "transition": dna["transition"],
                          "estilo": dna["estilo"], "hue": dna["hue"]})
             gravar_json("historico_planos.json", {"runs": runs[-30:]})
@@ -423,11 +463,14 @@ PEDIDO: {user_prompt}"""
             })
 
         if self.path == "/api/agent/scene":
+            client_prompt = body.get("prompt") or ""
             dna = body.get("dna") or {}
             scene = body.get("scene") or {}
             idx = int(body.get("idx") or 0)
             total = int(body.get("total") or 8)
             anterior = body.get("anterior") or ""
+            ponte_anterior = body.get("ponteAnterior") or ""
+            proxima_ideia = body.get("proximaIdeia") or ""
             width = int(body.get("width") or 720)
             height = int(body.get("height") or 1280)
             modelos = body.get("modelos") or ["gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-2.5-flash"]
@@ -435,32 +478,27 @@ PEDIDO: {user_prompt}"""
             chaves = extrair_chaves(body.get("key1", ""), body.get("key2", ""))
             if not chaves:
                 return self._send_json({"code": None, "origem": "fallback", "mi": mi_box[0], "logs": []})
-            logs = ['  cena %d/%d [%s] "%s" -> pedindo código ao Gemini...' % (idx + 1, total, scene.get("role"), scene.get("text"))]
+            agent_num = (idx % 2) + 1
+            logs = ['  cena %d/%d [%s] "%s" -> Agente %d criando animação exclusiva...' % (idx + 1, total, scene.get("role"), scene.get("text"), agent_num)]
             pal = dna.get("pal") or {}
-            p = f"""Você é um motion designer sênior que escreve JavaScript para Canvas 2D.
-Escreva SOMENTE o CORPO de uma função (sem a palavra function, sem markdown, sem explicações), com estes parâmetros disponíveis:
-(ctx, t, ts, W, H, P, M)
-- ctx: CanvasRenderingContext2D, tela vertical W x H ({width}x{height}). O fundo em gradiente JÁ foi pintado.
-- t: progresso da cena 0..1. ts: segundos desde o início da cena. P.dur: duração da cena em segundos.
-- P: {{text, role, seed, pulse (batida 0..1), bpm, energy (1-5), pal:{{bg1,bg2,acc,acc2,fg,dim}}}}  (cores em hex)
-  Paleta: bg1={pal.get('bg1')} bg2={pal.get('bg2')} acc={pal.get('acc')} acc2={pal.get('acc2')} fg={pal.get('fg')} dim={pal.get('dim')}
-- {M_API}
+            p = f"""Você é o Agente {agent_num}, Diretor de Animação e Creative Coder especialista em Canvas 2D.
+Sua missão é programar a CENA {idx + 1} de {total} para o pedido do cliente: "{client_prompt or dna.get('estilo')}".
+Fio Condutor: {dna.get('narrative_thread', '')}
+Conexão recebida da cena anterior: {ponte_anterior or anterior or 'Cena inicial (Hook)'}
+Conexão de saída para a próxima cena: {scene.get('visual_bridge') or proxima_ideia or 'Fechamento'}
+Layout exclusivo desta cena: {scene.get('layout_mode') or 'livre e autoral'} | Câmera: {scene.get('camera_motion') or 'dinâmica'}
+Ideia visual obrigatória: {scene.get('idea')}
+Texto Principal Falado (P.text): "{scene.get('text')}" | Complemento Falado (P.sub): "{scene.get('sub', '')}"
+Locução Completa da Voz: "{scene.get('narration', '')}"
+Parâmetros no escopo: (ctx, t, ts, W, H, P, M) em tela {width}x{height}.
+Paleta: bg1={pal.get('bg1')} bg2={pal.get('bg2')} acc={pal.get('acc')} acc2={pal.get('acc2')} fg={pal.get('fg')} dim={pal.get('dim')}
+{M_API}
 REGRAS:
-1. A cena é uma função PURA de ts: sem estado, sem Date/performance.now, sem Math.random (use M.rng(P.seed)).
-2. Anime TUDO com easing (nunca linear): entrada com antecipação/overshoot, movimento principal, detalhes secundários em atraso (overlap/stagger).
-3. Use no mínimo 3 camadas: elementos de fundo, elemento principal, detalhes de primeiro plano. Reaja à batida com P.pulse.
-4. O texto principal "{scene.get('text')}" (use P.text) DEVE aparecer legível: use M.text/M.mainText/M.fit. NÃO desenhe o subtítulo (o motor desenha).
-5. Use só as cores da paleta (e transparências). Mantenha ctx.save()/ctx.restore() equilibrados.
-6. Leve: no máximo ~1500 formas por frame. Sem imagens, sem DOM, sem rede, sem bibliotecas.
-CONTEXTO:
-- Estilo do reel: {dna.get('estilo')} - {dna.get('estilo_desc', '')}.
-- Cena {idx + 1} de {total}, papel: {scene.get('role')}. Duração aprox. {float(scene.get('dur', 3)):.1f}s.
-- Ideia visual desta cena: {scene.get('idea') or 'livre, coerente com o estilo'}
-- Cena anterior (NÃO repita): {anterior or 'nenhuma'}
-Exemplo do FORMATO esperado (corpo da função, outra ideia):
-{EXEMPLO}
-Agora escreva o corpo da função da cena."""
-            txt, glogs = gemini_call(p, chaves, modelos, mi_box, temperature=0.95, chave=idx)
+1. OBSERVAÇÃO OBRIGATÓRIA DE VOZ & ESCRITA NA TELA: Há uma voz narrando tudo que passa na tela! PRATICAMENTE QUASE TUDO QUE FOR FALADO NA VOZ TEM QUE APARECER DE ESCRITA NA TELA! Exiba P.text em destaque e chame M.sub(ctx, W, H, P, ts) no final da função.
+2. PROIBIDO usar layout padrão ou repetitivo. Crie o cenário, as formas temáticas e a tipografia integrada exatamente para a ideia "{scene.get('idea')}".
+3. Função pura de ts (use M.rng(P.seed)), sem rede/DOM.
+Escreva SOMENTE o corpo do código JavaScript (sem markdown, sem explicações):"""
+            txt, glogs = gemini_call(p, chaves, modelos, mi_box, temperature=0.98, chave=idx)
             logs.extend(glogs)
             if not txt:
                 logs.append("    sem código válido -> cena pronta (fallback)")
@@ -475,10 +513,49 @@ Agora escreva o corpo da função da cena."""
             gravar_json("biblioteca_cenas.json", biblioteca[-80:])
             return self._send_json({"code": code, "origem": "gemini", "mi": mi_box[0], "logs": logs})
 
+        if self.path == "/api/agent/tts":
+            chaves = extrair_chaves(body.get("key1", ""), body.get("key2", ""))
+            clean_text = str(body.get("text", "") or "").strip()
+            idx = int(body.get("idx") or 0)
+            voice_name = str(body.get("voiceName", "") or "Kore")
+            if not chaves or not clean_text:
+                return self._send_json({"audioBase64": None, "mimeType": None, "fallbackSpeech": True})
+            for attempt in range(len(chaves)):
+                key_idx = (idx + attempt) % len(chaves)
+                url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent"
+                payload = {
+                    "contents": [{"parts": [{"text": f"Narre em português do Brasil com tom dinâmico, envolvente e dicção clara: {clean_text}"}]}],
+                    "generationConfig": {
+                        "responseModalities": ["AUDIO"],
+                        "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice_name}}}
+                    }
+                }
+                try:
+                    req = urllib.request.Request(
+                        url,
+                        data=json.dumps(payload).encode("utf-8"),
+                        headers={"Content-Type": "application/json", "x-goog-api-key": chaves[key_idx]},
+                    )
+                    with urllib.request.urlopen(req, timeout=25) as r:
+                        data = json.loads(r.read().decode("utf-8"))
+                    inline = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [{}])[0].get("inlineData")
+                    if inline and inline.get("data"):
+                        return self._send_json({
+                            "audioBase64": str(inline["data"]),
+                            "mimeType": str(inline.get("mimeType") or "audio/L16;rate=24000"),
+                            "fallbackSpeech": False
+                        })
+                except Exception:
+                    continue
+            return self._send_json({"audioBase64": None, "mimeType": None, "fallbackSpeech": True})
+
         self._send_json({"error": "Not found"}, 404)
 
+
+handler = RenderServerHandler
 
 if __name__ == "__main__":
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), RenderServerHandler)
     print("Servidor Render Motion Showreel iniciado em http://0.0.0.0:%d" % PORT)
     srv.serve_forever()
+

@@ -19,6 +19,12 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
+  ScanEye,
+  FileText,
+  CheckCircle2,
+  Wrench,
+  Mic,
+  MicOff,
 } from 'lucide-react';
 import { INITIAL_SHOWREEL, SceneSpec, ShowreelData } from './types/showreel';
 import {
@@ -32,20 +38,51 @@ import {
   compositeTransition,
   buildJsBundle,
   buildStandaloneHtml,
+  buildSingleSceneJsFile,
+  inspectSceneFrames,
 } from './engine/motionEngine';
 import { ShowreelAudioSynth } from './engine/audioSynth';
 import {
   descobrirModelosLocal,
   gerarPlanoLocal,
   pedirCenaLocal,
+  revisarCenaLocal,
+  sintetizarVozCenaLocal,
 } from './engine/agentRunner';
 
 interface CompiledScene extends SceneSpec {
   fn: SceneDrawFn;
   start: number;
+  drawsSub: boolean;
 }
 
 const TR = 0.32;
+
+async function safeApiPost<T>(url: string, payload: Record<string, unknown>): Promise<T | null> {
+  // No Vercel (*.vercel.app), quando o usuário já colou as chaves na UI, roda direto pelo navegador (agentRunner)
+  // para evitar o limite de 10s de Serverless Function e qualquer erro 500 "A server error has occurred".
+  if (
+    typeof window !== 'undefined' &&
+    window.location.hostname.endsWith('.vercel.app') &&
+    (payload.key1 || payload.key2)
+  ) {
+    return null;
+  }
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return null;
+    const raw = await res.text();
+    const trimmed = raw.trim();
+    if (!trimmed.startsWith('{')) return null;
+    return JSON.parse(trimmed) as T;
+  } catch {
+    return null;
+  }
+}
 
 export default function App() {
   // ====================== CONFIGURAÇÃO (Persistida no navegador) ======================
@@ -54,6 +91,9 @@ export default function App() {
   const [geminiModel, setGeminiModel] = useState<string>(
     () => localStorage.getItem('GEMINI_MODEL') || 'auto'
   );
+  const [voiceName, setVoiceName] = useState<string>(
+    () => localStorage.getItem('VOICE_NAME') || 'Aoede'
+  );
   const [durationConfig, setDurationConfig] = useState<number>(
     () => Number(localStorage.getItem('DURATION')) || 30
   );
@@ -61,7 +101,7 @@ export default function App() {
     () => (localStorage.getItem('RES_CONFIG') as '720x1280' | '540x960') || '720x1280'
   );
   const [reaproveitarConfig, setReaproveitarConfig] = useState<number>(
-    () => Number(localStorage.getItem('REAPROVEITAR') ?? 0.25)
+    () => Number(localStorage.getItem('REAPROVEITAR') ?? 0.0)
   );
   const [pausaConfig, setPausaConfig] = useState<number>(
     () => Number(localStorage.getItem('PAUSA_ENTRE_CHAMADAS') ?? 1.5)
@@ -73,7 +113,8 @@ export default function App() {
   const [showKey2, setShowKey2] = useState<boolean>(false);
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
   const [discoveringModels, setDiscoveringModels] = useState<boolean>(false);
-  const [logExpanded, setLogExpanded] = useState<boolean>(false);
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
+  const [drawerTab, setDrawerTab] = useState<'files' | 'log'>('files');
   const [editingSceneIdx, setEditingSceneIdx] = useState<number | null>(null);
   const [draftSceneCode, setDraftSceneCode] = useState<string>('');
 
@@ -86,13 +127,19 @@ export default function App() {
       `DNA: ${d.dna.structure} | ${d.dna.transition} | ${d.dna.estilo} | ${d.dna.bpm} bpm | energia ${d.dna.energy}`,
     ];
     d.scenes.forEach((s, i) => {
-      initialLogs.push(`${i + 1}. [${s.role}] ${s.text}  (${s.origem}, ${s.dur.toFixed(1)}s)`);
+      const ag = (i % 2) + 1;
+      initialLogs.push(
+        `${i + 1}. [${s.role}] ${s.text}  (Agente ${ag} -> ${
+          s.fileName || `cena_0${i + 1}_${s.role}.js`
+        }, ${s.dur.toFixed(1)}s)`
+      );
     });
     return initialLogs;
   });
 
-  // Generation Pipeline State
+  // Generation & Visual Review State
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [isReviewing, setIsReviewing] = useState<boolean>(false);
   const [genProgressLabel, setGenProgressLabel] = useState<string>('');
   const abortGenRef = useRef<boolean>(false);
 
@@ -105,6 +152,7 @@ export default function App() {
 
   const [playing, setPlaying] = useState<boolean>(false);
   const [muted, setMuted] = useState<boolean>(false);
+  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(true);
   const [gtState, setGtState] = useState<number>(0);
   const [currentSceneIdx, setCurrentSceneIdx] = useState<number>(0);
   const [recording, setRecording] = useState<boolean>(false);
@@ -129,11 +177,11 @@ export default function App() {
     setLogs((prev) => [...prev, ...lines]);
   }, []);
 
-  // Save settings to localStorage
   const saveSettings = () => {
     localStorage.setItem('GEMINI_API_KEY_1', key1.trim());
     localStorage.setItem('GEMINI_API_KEY_2', key2.trim());
     localStorage.setItem('GEMINI_MODEL', geminiModel.trim() || 'auto');
+    localStorage.setItem('VOICE_NAME', voiceName);
     localStorage.setItem('DURATION', String(durationConfig));
     localStorage.setItem('RES_CONFIG', resConfig);
     localStorage.setItem('REAPROVEITAR', String(reaproveitarConfig));
@@ -145,24 +193,11 @@ export default function App() {
   const handleDiscoverModels = async () => {
     setDiscoveringModels(true);
     try {
-      let out: { modelos?: string[]; logs?: string[] } | null = null;
-      try {
-        const res = await fetch('/api/agent/models', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            key1: key1.trim(),
-            key2: key2.trim(),
-            modelPref: geminiModel,
-          }),
-        });
-        const ct = res.headers.get('content-type') || '';
-        if (res.ok && ct.includes('application/json')) {
-          out = await res.json();
-        }
-      } catch {
-        out = null;
-      }
+      let out = await safeApiPost<{ modelos?: string[]; logs?: string[] }>('/api/agent/models', {
+        key1: key1.trim(),
+        key2: key2.trim(),
+        modelPref: geminiModel,
+      });
 
       if (!out) {
         out = await descobrirModelosLocal(key1.trim(), key2.trim(), geminiModel);
@@ -181,16 +216,36 @@ export default function App() {
     }
   };
 
-  // Initialize Audio Synth & Render Keep-Alive Heartbeat
+  // Initialize Audio Synth & Render Keep-Alive Heartbeat + Run initial local visual inspection
   useEffect(() => {
     audioRef.current = new ShowreelAudioSynth();
+    // Run initial visual inspection on preset scenes so snapshots are ready immediately
+    setData((prev) => ({
+      ...prev,
+      scenes: prev.scenes.map((s, idx) => {
+        const check = inspectSceneFrames(s, idx, prev);
+        return {
+          ...s,
+          agentId: ((idx % 2) + 1) as 1 | 2,
+          fileName: s.fileName || `cena_${String(idx + 1).padStart(2, '0')}_${s.role}.js`,
+          visualCheck: {
+            passed: check.passed,
+            motionScore: check.motionScore,
+            coverageScore: check.coverageScore,
+            reviewNote: check.diagnosticReason,
+            snapshots: check.snapshots,
+          },
+        };
+      }),
+    }));
+
     const keepAliveTimer = window.setInterval(() => {
       fetch('/api/ping').catch(() => {});
     }, 4 * 60 * 1000);
     return () => window.clearInterval(keepAliveTimer);
   }, []);
 
-  // Fit Canvas to #stage maintaining exact W/H aspect ratio (como fitCanvas() do script Python)
+  // Fit Canvas to #stage maintaining exact W/H aspect ratio
   const fitCanvas = useCallback(() => {
     const st = stageRef.current;
     const cv = cvRef.current;
@@ -211,10 +266,18 @@ export default function App() {
   useEffect(() => {
     fitCanvas();
     window.addEventListener('resize', fitCanvas);
-    return () => window.removeEventListener('resize', fitCanvas);
-  }, [fitCanvas, logExpanded]);
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && stageRef.current) {
+      ro = new ResizeObserver(() => fitCanvas());
+      ro.observe(stageRef.current);
+    }
+    return () => {
+      window.removeEventListener('resize', fitCanvas);
+      ro?.disconnect();
+    };
+  }, [fitCanvas, drawerOpen]);
 
-  // Compile scenes & run pre-flight test at [.05, .5, .95] (>120ms/frame degrades to fallback)
+  // Compile scenes & run pre-flight test at [.05, .5, .95]
   useEffect(() => {
     const W = data.W;
     const H = data.H;
@@ -247,11 +310,13 @@ export default function App() {
       }
       const start = acc;
       acc += s.dur;
+      const drawsSub = Boolean(s.code && /\b(P\.sub|M\.sub)\b/.test(s.code));
       return {
         ...s,
         fn,
         origem,
         start,
+        drawsSub,
       };
     });
 
@@ -275,16 +340,23 @@ export default function App() {
               pulse: pulseAt(gt, data.dna.bpm, data.dna.energy),
               gt,
               i,
+              layout_mode: s.layout_mode,
+              camera_motion: s.camera_motion,
+              visual_bridge: s.visual_bridge,
+              narration: s.narration || `${s.text}. ${s.sub || ''}`,
             };
             MotionLib.bg(cxn, W, H, P, i);
             s.fn(cxn, MotionLib.clamp(ts / s.dur), ts, W, H, P, MotionLib);
-            MotionLib.sub(cxn, W, H, P, ts);
+            if (!s.drawsSub) {
+              MotionLib.sub(cxn, W, H, P, ts);
+            }
           });
           const ms = (performance.now() - t0) / 3;
           if (ms > 120) {
             appendLog(`cena ${i + 1}: muito pesada (${Math.round(ms)} ms/frame) -> fallback`);
             s.fn = FallbackEngines[s.fb] || FallbackEngines.kinetic;
             s.origem = 'fallback';
+            s.drawsSub = false;
           }
         } catch (e) {
           appendLog(
@@ -292,6 +364,7 @@ export default function App() {
           );
           s.fn = FallbackEngines[s.fb] || FallbackEngines.kinetic;
           s.origem = 'fallback';
+          s.drawsSub = false;
         }
       });
     }
@@ -320,6 +393,10 @@ export default function App() {
         pulse: pulseAt(gt, data.dna.bpm, data.dna.energy),
         gt,
         i,
+        layout_mode: s.layout_mode,
+        camera_motion: s.camera_motion,
+        visual_bridge: s.visual_bridge,
+        narration: s.narration || `${s.text}. ${s.sub || ''}`,
       };
       MotionLib.bg(c, W, H, P, i);
       try {
@@ -330,14 +407,17 @@ export default function App() {
         );
         s.fn = FallbackEngines[s.fb] || FallbackEngines.kinetic;
         s.origem = 'fallback';
+        s.drawsSub = false;
         resetCanvasCtx(c);
         MotionLib.bg(c, W, H, P, i);
         s.fn(c, MotionLib.clamp(ts / s.dur), ts, W, H, P, MotionLib);
       }
-      try {
-        MotionLib.sub(c, W, H, P, ts);
-      } catch {
-        // ignore
+      if (!s.drawsSub) {
+        try {
+          MotionLib.sub(c, W, H, P, ts);
+        } catch {
+          // ignore
+        }
       }
     },
     [data, appendLog]
@@ -363,19 +443,26 @@ export default function App() {
 
       let i = 0;
       while (i < sc.length - 1 && gt >= sc[i + 1].start) i++;
-      const ts = gt - sc[i].start;
+      // Quando pausado em 0.0s, renderiza o quadro de destaque (poster frame em 0.85s da Cena 1)
+      // para que o canvas nunca apareça preto ou vazio antes de dar Play!
+      const rawTs = gt - sc[i].start;
+      const ts =
+        !playingRef.current && gt < 0.05
+          ? Math.min(sc[0].dur * 0.45, 0.95)
+          : rawTs;
 
       if (i > 0 && ts < TR) {
         paint(cxn, i, ts, gt);
         paint(cxo, i - 1, sc[i - 1].dur + ts, gt);
-        compositeTransition(ctx, co, cn, data.dna.transition, ts / TR, W, H, data.dna.pal);
+        const trKind = sc[i - 1].transition_out || data.dna.transition;
+        compositeTransition(ctx, co, cn, trKind, ts / TR, W, H, data.dna.pal);
       } else {
         paint(ctx, i, ts, gt);
       }
 
-      const f = gt < 0.4 ? 1 - gt / 0.4 : gt > DUR - 0.5 ? 1 - (DUR - gt) / 0.5 : 0;
+      const f = gt > DUR - 0.4 ? 1 - (DUR - gt) / 0.4 : 0;
       if (f > 0) {
-        ctx.fillStyle = `rgba(0,0,0,${MotionLib.clamp(f)})`;
+        ctx.fillStyle = `rgba(0,0,0,${MotionLib.clamp(f * 0.85)})`;
         ctx.fillRect(0, 0, W, H);
       }
       return i;
@@ -389,7 +476,6 @@ export default function App() {
     }
   }, []);
 
-  // Main requestAnimationFrame loop (idêntico ao tick() do HTML original)
   useEffect(() => {
     let rafId = 0;
     let lastHudUpdate = 0;
@@ -417,11 +503,25 @@ export default function App() {
           if (h % 2 === 0) audioRef.current.kick();
           else audioRef.current.hat();
         }
-        if (lastSceneRef.current >= 0 && i !== lastSceneRef.current) {
-          audioRef.current.whoosh();
+        if (i !== lastSceneRef.current) {
+          if (lastSceneRef.current >= 0) {
+            audioRef.current.whoosh();
+          }
+          const curSc = compiledScenesRef.current[i];
+          if (curSc) {
+            const spokenLine =
+              curSc.narration ||
+              (curSc.sub ? `${curSc.text}. ${curSc.sub}` : curSc.text);
+            void audioRef.current.speakScene({
+              text: spokenLine,
+              voiceAudioBase64: curSc.voiceAudioBase64,
+              voiceMimeType: curSc.voiceMimeType,
+              sceneDuration: curSc.dur,
+            });
+          }
         }
+        lastSceneRef.current = i;
       }
-      lastSceneRef.current = i;
 
       if (now - lastHudUpdate > 50) {
         lastHudUpdate = now;
@@ -444,27 +544,31 @@ export default function App() {
     t0Ref.current = performance.now() - gtRef.current * 1000;
     playingRef.current = true;
     lastHalfRef.current = -1;
+    lastSceneRef.current = -1;
     setPlaying(true);
     try {
       if ('wakeLock' in navigator && navigator.wakeLock) {
         await navigator.wakeLock.request('screen');
       }
     } catch {
-      // ignore wakeLock errors
+      // ignore
     }
   };
 
   const pause = () => {
     playingRef.current = false;
+    audioRef.current?.stopVoice();
     setPlaying(false);
   };
 
   const handleRestart = () => {
+    audioRef.current?.stopVoice();
     gtRef.current = 0;
     if (playingRef.current) {
       t0Ref.current = performance.now();
     }
     lastHalfRef.current = -1;
+    lastSceneRef.current = -1;
     setGtState(0);
     setCurrentSceneIdx(0);
   };
@@ -476,10 +580,21 @@ export default function App() {
     setMuted(nextMuted);
   };
 
+  const handleToggleVoice = async () => {
+    await audioRef.current?.resume();
+    const nextVoice = !voiceEnabled;
+    audioRef.current?.setVoiceEnabled(nextVoice);
+    setVoiceEnabled(nextVoice);
+    if (nextVoice && playingRef.current) {
+      lastSceneRef.current = -1;
+    }
+  };
+
   const handleSeek = (val: number) => {
     pause();
     const nextGt = (val / 1000) * data.duration;
     gtRef.current = nextGt;
+    lastSceneRef.current = -1;
     setGtState(nextGt);
     const i = frame(nextGt);
     setCurrentSceneIdx(i);
@@ -544,16 +659,30 @@ export default function App() {
     await play();
   };
 
+  // Salvar o pacote completo todas_as_cenas.js
   const saveCode = () => {
     const out = buildJsBundle(data);
     const b = new Blob([out], { type: 'text/javascript' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(b);
-    a.download = `showreel_codigo_${Date.now()}.js`;
+    a.download = `todas_as_cenas_${Date.now()}.js`;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    appendLog('código salvo (download)');
+    appendLog('todas_as_cenas.js salvo (download)');
+  };
+
+  // Salvar arquivo individual de uma cena (ex: cena_01_hook.js)
+  const downloadSingleSceneFile = (scene: SceneSpec, idx: number) => {
+    const { fileName, content } = buildSingleSceneJsFile(scene, idx, data);
+    const b = new Blob([content], { type: 'text/javascript' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    appendLog(`Arquivo individual salvo: ${fileName}`);
   };
 
   const saveHtml = () => {
@@ -568,51 +697,186 @@ export default function App() {
     appendLog('HTML standalone salvo (download)');
   };
 
-  // ====================== FLUXO EXATO DO AGENTE PYTHON (Roteiro -> Cena por Cena alternando Chaves) ======================
+  // ====================== ETAPA DE REVISÃO VISUAL & AUTO-REPARO PELOS AGENTES ======================
+  const runVisualInspectionPass = async (
+    reelToInspect: ShowreelData,
+    modelos: string[],
+    currentMi: number
+  ): Promise<ShowreelData> => {
+    setIsReviewing(true);
+    let workingReel = { ...reelToInspect, scenes: [...reelToInspect.scenes] };
+    const total = workingReel.scenes.length;
+    const temChave = Boolean(key1.trim() || key2.trim());
+
+    appendLog('\n=== INICIANDO REVISÃO VISUAL DO SHOWREEL (QUADRO A QUADRO) ===');
+
+    for (let i = 0; i < total; i++) {
+      if (abortGenRef.current) break;
+      const s = workingReel.scenes[i];
+      const agentNum = ((i % 2) + 1) as 1 | 2;
+      const numStr = String(i + 1).padStart(2, '0');
+      const fileName = s.fileName || `cena_${numStr}_${s.role}.js`;
+
+      setGenProgressLabel(`👁️ Agente ${agentNum} vendo ${fileName} (${i + 1}/${total})...`);
+
+      // 1. Renderiza a cena em 15%, 50% e 85% para o Agente "ver" o que criou
+      const frameCheck = inspectSceneFrames(s, i, workingReel);
+      const needsRepair = !frameCheck.passed || s.origem === 'fallback' || !s.code;
+
+      let reviewNote = frameCheck.diagnosticReason;
+      let repaired = false;
+      let currentScene: SceneSpec = {
+        ...s,
+        agentId: agentNum,
+        fileName,
+        visualCheck: {
+          passed: frameCheck.passed,
+          motionScore: frameCheck.motionScore,
+          coverageScore: frameCheck.coverageScore,
+          reviewNote: frameCheck.diagnosticReason,
+          snapshots: frameCheck.snapshots,
+          repaired: false,
+        },
+      };
+
+      // 2. Se houver chave configurada, o Agente Diretor analisa o snapshot real (ou reconstrói a cena se tiver falha/animação faltante)
+      if (temChave) {
+        let revOut = await safeApiPost<{
+          approved: boolean;
+          repairedCode: string | null;
+          reviewNote: string;
+          logs?: string[];
+        }>('/api/agent/review-scene', {
+          prompt: workingReel.prompt || '',
+          dna: workingReel.dna,
+          scene: s,
+          idx: i,
+          total,
+          width: workingReel.W,
+          height: workingReel.H,
+          snapshotDataUrl: frameCheck.snapshots[1] || frameCheck.snapshots[0],
+          diagnosticReason: frameCheck.diagnosticReason,
+          needsRepair,
+          key1: key1.trim(),
+          key2: key2.trim(),
+          modelos,
+          mi: currentMi,
+        });
+
+        if (!revOut) {
+          revOut = await revisarCenaLocal({
+            prompt: workingReel.prompt || '',
+            dna: workingReel.dna,
+            scene: s,
+            idx: i,
+            total,
+            width: workingReel.W,
+            height: workingReel.H,
+            snapshotDataUrl: frameCheck.snapshots[1] || frameCheck.snapshots[0],
+            diagnosticReason: frameCheck.diagnosticReason,
+            needsRepair,
+            key1: key1.trim(),
+            key2: key2.trim(),
+            modelos,
+            mi: currentMi,
+          });
+        }
+
+        if (revOut.logs && revOut.logs.length > 0) {
+          appendLog(revOut.logs);
+        }
+        reviewNote = revOut.reviewNote || reviewNote;
+
+        if (revOut.repairedCode) {
+          const updatedScene: SceneSpec = {
+            ...currentScene,
+            code: revOut.repairedCode,
+            origem: 'gemini',
+            status: 'ready',
+          };
+          const reCheck = inspectSceneFrames(updatedScene, i, workingReel);
+          repaired = true;
+          currentScene = {
+            ...updatedScene,
+            visualCheck: {
+              passed: reCheck.passed,
+              motionScore: reCheck.motionScore,
+              coverageScore: reCheck.coverageScore,
+              reviewNote: `${reviewNote} (${reCheck.motionScore}% mov)`,
+              snapshots: reCheck.snapshots,
+              repaired: true,
+            },
+          };
+        } else {
+          currentScene = {
+            ...currentScene,
+            visualCheck: {
+              ...currentScene.visualCheck!,
+              reviewNote,
+              repaired,
+            },
+          };
+        }
+
+        if (needsRepair && i < total - 1 && pausaConfig > 0) {
+          await new Promise((r) => setTimeout(r, pausaConfig * 1000));
+        }
+      } else {
+        appendLog(
+          `  👁️ ${fileName}: Movimento=${frameCheck.motionScore}% | Cobertura=${frameCheck.coverageScore}% (${
+            frameCheck.passed ? 'OK' : 'Fallback'
+          })`
+        );
+      }
+
+      workingReel = {
+        ...workingReel,
+        scenes: workingReel.scenes.map((item, idx) => (idx === i ? currentScene : item)),
+      };
+      setData(workingReel);
+    }
+
+    appendLog(
+      `=== REVISÃO FINALIZADA: Todas as ${total} cenas unificadas no Showreel Final ===`
+    );
+    setIsReviewing(false);
+    setGenProgressLabel('');
+    return workingReel;
+  };
+
+  // ====================== FLUXO MULTI-AGENTE COMPLETO (Roteiro -> Agente 1/2 por Cena -> Revisão Visual -> União Final) ======================
   const handleRunAgent = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (isGenerating) return;
+    if (isGenerating || isReviewing) return;
 
     setIsGenerating(true);
     abortGenRef.current = false;
     const [W, H] = resConfig === '540x960' ? [540, 960] : [720, 1280];
     const userPrompt = promptText.trim() || 'showreel de motion design moderno';
 
-    setLogs([`Iniciando Showreel Agent para: "${userPrompt}"...`]);
-    setGenProgressLabel('1/2 · Criando roteiro e DNA...');
+    const shortPromptPreview =
+      userPrompt.length > 100 ? `${userPrompt.slice(0, 100)}...` : userPrompt;
+    setLogs([`Iniciando Pipeline Multi-Agente para: "${shortPromptPreview}"`]);
+    setGenProgressLabel('Roteirizando showreel...');
 
     try {
-      // Passo 1: pedir_roteiro (tenta servidor primeiro; na Vercel estática roda direto no cliente)
-      let planData: {
+      // Etapa 1: Criar Roteiro
+      let planData = await safeApiPost<{
         showreel: ShowreelData;
         modelos?: string[];
         mi?: number;
         tem_chave?: boolean;
         logs?: string[];
-      } | null = null;
-
-      try {
-        const planRes = await fetch('/api/agent/plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: userPrompt,
-            key1: key1.trim(),
-            key2: key2.trim(),
-            geminiModel: geminiModel.trim() || 'auto',
-            duration: durationConfig,
-            width: W,
-            height: H,
-            reaproveitar: reaproveitarConfig,
-          }),
-        });
-        const ct = planRes.headers.get('content-type') || '';
-        if (planRes.ok && ct.includes('application/json')) {
-          planData = await planRes.json();
-        }
-      } catch {
-        planData = null;
-      }
+      }>('/api/agent/plan', {
+        prompt: userPrompt,
+        key1: key1.trim(),
+        key2: key2.trim(),
+        geminiModel: geminiModel.trim() || 'auto',
+        duration: durationConfig,
+        width: W,
+        height: H,
+        reaproveitar: reaproveitarConfig,
+      });
 
       if (!planData) {
         planData = await gerarPlanoLocal({
@@ -631,7 +895,15 @@ export default function App() {
         appendLog(planData.logs);
       }
 
-      let currentReel: ShowreelData = planData.showreel;
+      let currentReel: ShowreelData = {
+        ...planData.showreel,
+        scenes: planData.showreel.scenes.map((s, idx) => ({
+          ...s,
+          agentId: ((idx % 2) + 1) as 1 | 2,
+          fileName: `cena_${String(idx + 1).padStart(2, '0')}_${s.role}.js`,
+        })),
+      };
+
       const modelos: string[] = planData.modelos || [
         'gemini-3.1-flash-lite',
         'gemini-3-flash-preview',
@@ -640,13 +912,14 @@ export default function App() {
       let currentMi: number = planData.mi || 0;
       const temChave: boolean = Boolean(planData.tem_chave);
 
-      // Carrega o roteiro imediatamente no Canvas (com fallbacks/biblioteca enquanto compila cada cena)
       setData(currentReel);
+      setDrawerOpen(true);
+      setDrawerTab('files');
       gtRef.current = 0;
       t0Ref.current = performance.now();
       await play();
 
-      // Passo 2: pedir_cena para cada cena (alternando entre Chave 1 e Chave 2, com PAUSA_ENTRE_CHAMADAS)
+      // Etapa 2: Agente 1 (Cena 1, 3, 5...) e Agente 2 (Cena 2, 4, 6...) criam e salvam cada arquivo .js
       if (temChave) {
         let anterior = '';
         let novos = 0;
@@ -655,57 +928,55 @@ export default function App() {
         for (let i = 0; i < total; i++) {
           if (abortGenRef.current) break;
           const s = currentReel.scenes[i];
+          const agentNum = ((i % 2) + 1) as 1 | 2;
+          const fileName = s.fileName || `cena_${String(i + 1).padStart(2, '0')}_${s.role}.js`;
 
           if (s.origem === 'biblioteca' && s.code) {
             anterior = s.idea || s.text;
             continue;
           }
 
-          const activeKeyNum = key2.trim() && key1.trim() ? (i % 2) + 1 : 1;
           setGenProgressLabel(
-            `Cena ${i + 1}/${total} [${s.role}] · Chave ${activeKeyNum}...`
+            `Agente ${agentNum} (Chave ${agentNum}) → ${fileName}...`
           );
 
-          let sceneOut: {
+          const prevScene = i > 0 ? currentReel.scenes[i - 1] : null;
+          const nextScene = i < total - 1 ? currentReel.scenes[i + 1] : null;
+          const ponteAnterior = prevScene?.visual_bridge || '';
+          const proximaIdeia = nextScene ? `${nextScene.text} (${nextScene.idea})` : '';
+
+          let sceneOut = await safeApiPost<{
             code: string | null;
             origem: string;
             mi?: number;
             logs?: string[];
-          } | null = null;
-
-          try {
-            const sceneRes = await fetch('/api/agent/scene', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                dna: currentReel.dna,
-                scene: s,
-                idx: i,
-                total,
-                anterior,
-                width: W,
-                height: H,
-                key1: key1.trim(),
-                key2: key2.trim(),
-                modelos,
-                mi: currentMi,
-              }),
-            });
-            const ct = sceneRes.headers.get('content-type') || '';
-            if (sceneRes.ok && ct.includes('application/json')) {
-              sceneOut = await sceneRes.json();
-            }
-          } catch {
-            sceneOut = null;
-          }
+          }>('/api/agent/scene', {
+            prompt: userPrompt,
+            dna: currentReel.dna,
+            scene: s,
+            idx: i,
+            total,
+            anterior,
+            ponteAnterior,
+            proximaIdeia,
+            width: W,
+            height: H,
+            key1: key1.trim(),
+            key2: key2.trim(),
+            modelos,
+            mi: currentMi,
+          });
 
           if (!sceneOut) {
             sceneOut = await pedirCenaLocal({
+              prompt: userPrompt,
               dna: currentReel.dna,
               scene: s,
               idx: i,
               total,
               anterior,
+              ponteAnterior,
+              proximaIdeia,
               width: W,
               height: H,
               key1: key1.trim(),
@@ -714,6 +985,7 @@ export default function App() {
               mi: currentMi,
             });
           }
+
           if (Array.isArray(sceneOut.logs)) {
             appendLog(sceneOut.logs);
           }
@@ -721,47 +993,77 @@ export default function App() {
             currentMi = sceneOut.mi;
           }
 
-          if (sceneOut.code) {
-            novos += 1;
-            currentReel = {
-              ...currentReel,
-              scenes: currentReel.scenes.map((scItem, idx) =>
-                idx === i
-                  ? { ...scItem, code: sceneOut.code, origem: 'gemini', status: 'ready' }
-                  : scItem
-              ),
-            };
-            setData(currentReel);
-          } else {
-            currentReel = {
-              ...currentReel,
-              scenes: currentReel.scenes.map((scItem, idx) =>
-                idx === i ? { ...scItem, status: 'ready' } : scItem
-              ),
-            };
-            setData(currentReel);
+          // Sintetiza também a Voz Neural (Gemini TTS) da cena usando a Chave alternada do Agente
+          const spokenText =
+            s.narration || (s.sub ? `${s.text}. ${s.sub}` : s.text);
+          let ttsOut = await safeApiPost<{
+            audioBase64: string | null;
+            mimeType: string | null;
+            fallbackSpeech?: boolean;
+          }>('/api/agent/tts', {
+            text: spokenText,
+            idx: i,
+            voiceName,
+            key1: key1.trim(),
+            key2: key2.trim(),
+          });
+
+          if (!ttsOut) {
+            ttsOut = await sintetizarVozCenaLocal({
+              text: spokenText,
+              idx: i,
+              voiceName,
+              key1: key1.trim(),
+              key2: key2.trim(),
+            });
           }
+
+          const updatedScene: SceneSpec = {
+            ...s,
+            narration: spokenText,
+            voiceAudioBase64: ttsOut?.audioBase64 || undefined,
+            voiceMimeType: ttsOut?.mimeType || undefined,
+            agentId: agentNum,
+            fileName,
+            code: sceneOut.code || null,
+            origem: sceneOut.code ? 'gemini' : 'fallback',
+            status: 'ready',
+          };
+
+          if (sceneOut.code) novos += 1;
+
+          currentReel = {
+            ...currentReel,
+            scenes: currentReel.scenes.map((scItem, idx) =>
+              idx === i ? updatedScene : scItem
+            ),
+          };
+          setData(currentReel);
 
           anterior = s.idea || s.text;
 
-          // Pausa configurável entre chamadas para respeitar limite gratuito
           if (i < total - 1 && pausaConfig > 0) {
             await new Promise((r) => setTimeout(r, pausaConfig * 1000));
           }
         }
 
         appendLog(
-          `\nPRONTO! ${currentReel.scenes.length} cenas (${novos} novas do Gemini).`
+          `\nFase de Criação concluída: ${currentReel.scenes.length} arquivos gerados (${novos} novos do Gemini).`
         );
+
+        // Etapa 3: Revisão Visual Automática (Os Agentes "veem" cada cena renderizada e consertam qualquer animação faltante)
+        await runVisualInspectionPass(currentReel, modelos, currentMi);
       } else {
+        await runVisualInspectionPass(currentReel, modelos, currentMi);
         appendLog(
-          `\nPRONTO! ${currentReel.scenes.length} cenas em modo offline (abra a ⚙️ Engrenagem para colar suas 2 chaves da Gemini).`
+          `\nModo offline concluído (abra a ⚙️ Engrenagem para colar as Chaves 1 e 2 da Gemini).`
         );
       }
     } catch (err) {
       appendLog(`Erro: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGenerating(false);
+      setIsReviewing(false);
       setGenProgressLabel('');
     }
   };
@@ -769,39 +1071,42 @@ export default function App() {
   const activeScene =
     compiledScenesRef.current[currentSceneIdx] || data.scenes[currentSceneIdx] || data.scenes[0];
   const configuredKeysCount = [key1.trim(), key2.trim()].filter(Boolean).length;
+  const activeAgentNum = ((currentSceneIdx % 2) + 1) as 1 | 2;
 
   return (
-    <div className="h-[100dvh] w-full bg-[#07070b] text-[#eee] flex flex-col items-center p-2.5 sm:p-4 box-border gap-2.5 overflow-hidden select-none">
-      {/* #top: Barra Superior Minimalista + Botão da Engrenagem ⚙️ para as 2 Chaves */}
+    <div className="h-[100dvh] w-full bg-[#07070b] text-[#eee] flex flex-col items-center p-2.5 sm:p-4 box-border gap-2 overflow-hidden select-none">
+      {/* #top: Barra Superior Minimalista + Status do Agente da Cena + Botão Engrenagem ⚙️ */}
       <header className="w-full max-w-2xl flex items-center justify-between gap-2 text-xs sm:text-sm shrink-0">
-        <div className="flex items-baseline gap-2.5 min-w-0">
+        <div className="flex items-baseline gap-2 min-w-0">
           <b className="text-sm sm:text-base font-bold text-white truncate">
             {data.title}
           </b>
-          <span className="opacity-70 font-mono text-[11px] sm:text-xs tabular-nums truncate">
+          <span className="opacity-75 font-mono text-[11px] sm:text-xs tabular-nums truncate">
             {recording ? '● GRAVANDO  ' : ''}
             {gtState.toFixed(1)}s / {data.duration}s · cena {currentSceneIdx + 1}/
-            {data.scenes.length} ({activeScene?.origem || 'fallback'})
+            {data.scenes.length} · Agente {activeAgentNum} ({activeScene?.origem || 'fallback'})
           </span>
         </div>
 
-        {/* Botão da Engrenagem (Chave 1 e Chave 2 da Gemini) */}
+        {/* Botão da Engrenagem (Chave 1 = Agente 1 | Chave 2 = Agente 2) */}
         <button
           type="button"
           onClick={() => setSettingsOpen(true)}
-          title="Configurar Chave 1 e Chave 2 da Gemini"
+          title="Configurar Chave 1 (Agente 1) e Chave 2 (Agente 2)"
           className="min-h-[40px] px-3 rounded-xl bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-xs font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform shrink-0"
         >
           <Settings className="w-4 h-4 text-[#e11d48]" />
           <span>
-            {configuredKeysCount > 0
-              ? `${configuredKeysCount} Chave${configuredKeysCount > 1 ? 's' : ''}`
+            {configuredKeysCount === 2
+              ? '2 Agentes Ativos'
+              : configuredKeysCount === 1
+              ? '1 Chave Ativa'
               : 'Chaves API'}
           </span>
         </button>
       </header>
 
-      {/* Barra de Prompt Direta (Mobile-First Minimalista) */}
+      {/* Barra de Prompt Direta */}
       <form
         onSubmit={handleRunAgent}
         className="w-full max-w-2xl flex items-center gap-2 shrink-0"
@@ -810,19 +1115,19 @@ export default function App() {
           type="text"
           value={promptText}
           onChange={(e) => setPromptText(e.target.value)}
-          placeholder="Descreva o showreel (ex: tipografia cinética neon, 3D futurista)..."
+          placeholder="Descreva o showreel (Agente 1 e Agente 2 criarão e revisarão cada cena)..."
           className="flex-1 h-11 px-3.5 rounded-xl bg-[#12121c] border border-[#2c2c40] focus:border-[#e11d48] focus:outline-none text-xs sm:text-sm text-white placeholder:text-white/40"
         />
         <button
           type="submit"
-          disabled={isGenerating}
+          disabled={isGenerating || isReviewing}
           className="h-11 px-4 rounded-xl bg-[#e11d48] hover:bg-[#be123c] disabled:opacity-50 text-xs sm:text-sm font-semibold text-white flex items-center gap-1.5 active:scale-95 transition-transform whitespace-nowrap shrink-0"
         >
-          {isGenerating ? (
+          {isGenerating || isReviewing ? (
             <>
               <RefreshCw className="w-4 h-4 animate-spin" />
-              <span className="max-w-[140px] sm:max-w-none truncate">
-                {genProgressLabel || 'Gerando...'}
+              <span className="max-w-[165px] sm:max-w-none truncate">
+                {genProgressLabel || 'Processando...'}
               </span>
             </>
           ) : (
@@ -834,10 +1139,10 @@ export default function App() {
         </button>
       </form>
 
-      {/* #stage: Palco 9:16 Responsivo de Alta Performance */}
+      {/* #stage: Palco 9:16 Responsivo */}
       <div
         ref={stageRef}
-        className="flex-1 min-h-0 w-full max-w-2xl flex justify-center items-center relative"
+        className="flex-1 min-h-[210px] sm:min-h-[300px] w-full max-w-2xl flex justify-center items-center relative"
       >
         <canvas
           ref={cvRef}
@@ -848,11 +1153,13 @@ export default function App() {
         />
       </div>
 
-      {/* #seek: Scrubber + Seletores Rápidos de Cena */}
+      {/* #seek: Seletores de Arquivos por Cena (Agente 1 ⇄ Agente 2) + Scrubber */}
       <div className="w-full max-w-2xl space-y-1.5 shrink-0">
         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
           {data.scenes.map((s, idx) => {
             const isCur = idx === currentSceneIdx;
+            const ag = ((idx % 2) + 1) as 1 | 2;
+            const vPass = s.visualCheck?.passed;
             return (
               <button
                 key={idx}
@@ -861,6 +1168,7 @@ export default function App() {
                   const sc = compiledScenesRef.current[idx];
                   if (sc) {
                     gtRef.current = sc.start + 0.01;
+                    lastSceneRef.current = -1;
                     if (playingRef.current) {
                       t0Ref.current = performance.now() - gtRef.current * 1000;
                     }
@@ -873,16 +1181,18 @@ export default function App() {
                   setEditingSceneIdx(idx);
                   setDraftSceneCode(s.code || '');
                 }}
+                title={`Cena ${idx + 1} (${s.fileName || `cena_0${idx + 1}.js`}) · Agente ${ag}`}
                 className={`h-6 px-2 rounded-md font-mono text-[11px] tabular-nums flex items-center gap-1 transition-colors shrink-0 border ${
                   isCur
                     ? 'bg-[#e11d48] text-white border-[#e11d48] font-semibold'
                     : s.status === 'compiling'
                     ? 'bg-[#1b1b28] text-[#f59e0b] border-[#f59e0b]/40'
-                    : 'bg-[#12121c] text-white/60 border-[#252538] hover:text-white'
+                    : 'bg-[#12121c] text-white/70 border-[#252538] hover:text-white'
                 }`}
               >
-                <span>{idx + 1}</span>
-                <span className="opacity-75">{s.role}</span>
+                <span>C{idx + 1}</span>
+                <span className="opacity-65">A{ag}</span>
+                {vPass && <span className="text-[#10b981]">✓</span>}
               </button>
             );
           })}
@@ -892,10 +1202,12 @@ export default function App() {
               setEditingSceneIdx(currentSceneIdx);
               setDraftSceneCode(data.scenes[currentSceneIdx]?.code || '');
             }}
-            className="ml-auto h-6 px-2.5 rounded-md bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-[11px] text-white/80 flex items-center gap-1 shrink-0"
+            className="ml-auto h-6 px-2.5 rounded-md bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-[11px] text-white/85 flex items-center gap-1 shrink-0"
           >
             <Code2 className="w-3 h-3 text-[#f59e0b]" />
-            <span>Editar Cena {currentSceneIdx + 1}</span>
+            <span>
+              {data.scenes[currentSceneIdx]?.fileName || `cena_0${currentSceneIdx + 1}.js`}
+            </span>
           </button>
         </div>
 
@@ -910,15 +1222,15 @@ export default function App() {
         />
       </div>
 
-      {/* #bar: Barra de Controles Fiel ao Script Original + Ergonomia Mobile */}
+      {/* #bar: Controles do Showreel + Botão de Revisão Visual IA */}
       <div
         id="bar"
-        className="w-full max-w-2xl flex flex-wrap justify-center gap-2 shrink-0"
+        className="w-full max-w-2xl flex flex-wrap justify-center gap-1.5 sm:gap-2 shrink-0"
       >
         <button
           type="button"
           onClick={() => (playing ? pause() : play())}
-          className="min-h-[44px] px-4 rounded-xl bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-sm font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform"
+          className="min-h-[42px] px-3.5 rounded-xl bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-xs sm:text-sm font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform"
         >
           {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           <span>{playing ? 'Pausar' : 'Play'}</span>
@@ -928,7 +1240,7 @@ export default function App() {
           type="button"
           onClick={handleRestart}
           title="Reiniciar"
-          className="min-h-[44px] px-3.5 rounded-xl bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-sm font-medium text-white flex items-center justify-center active:scale-95 transition-transform"
+          className="min-h-[42px] px-3 rounded-xl bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-xs sm:text-sm font-medium text-white flex items-center justify-center active:scale-95 transition-transform"
         >
           <RotateCcw className="w-4 h-4" />
         </button>
@@ -936,7 +1248,7 @@ export default function App() {
         <button
           type="button"
           onClick={handleToggleSound}
-          className="min-h-[44px] px-3.5 rounded-xl bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-sm font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform"
+          className="min-h-[42px] px-3 rounded-xl bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-xs sm:text-sm font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform"
         >
           {muted ? (
             <VolumeX className="w-4 h-4 text-white/50" />
@@ -948,9 +1260,46 @@ export default function App() {
 
         <button
           type="button"
+          onClick={handleToggleVoice}
+          title="Ativar/Desativar Voz Narrando Tudo que Passa na Tela"
+          className={`min-h-[42px] px-3 rounded-xl border text-xs sm:text-sm font-medium flex items-center gap-1.5 active:scale-95 transition-transform ${
+            voiceEnabled && !muted
+              ? 'bg-[#1b1b28] hover:bg-[#252538] border-[#e11d48]/70 text-white'
+              : 'bg-[#12121c] border-[#33334a] text-white/55'
+          }`}
+        >
+          {voiceEnabled && !muted ? (
+            <Mic className="w-4 h-4 text-[#e11d48]" />
+          ) : (
+            <MicOff className="w-4 h-4 text-white/45" />
+          )}
+          <span>{voiceEnabled ? `Voz (${voiceName})` : 'Voz OFF'}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() =>
+            runVisualInspectionPass(
+              data,
+              discoveredModels.length
+                ? discoveredModels
+                : ['gemini-3.1-flash-lite', 'gemini-3-flash-preview', 'gemini-2.5-flash'],
+              0
+            )
+          }
+          disabled={isGenerating || isReviewing}
+          title="Agentes assistem cada cena (15%, 50%, 85%) e consertam qualquer animação faltante"
+          className="min-h-[42px] px-3 rounded-xl bg-[#1b1b28] hover:bg-[#252538] disabled:opacity-50 border border-[#33334a] text-xs sm:text-sm font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform"
+        >
+          <ScanEye className="w-4 h-4 text-[#10b981]" />
+          <span>Revisar Cenas</span>
+        </button>
+
+        <button
+          type="button"
           onClick={recording ? stopRec : startRec}
           disabled={recording}
-          className="min-h-[44px] px-4 rounded-xl bg-[#8a1030] hover:bg-[#a31439] disabled:opacity-60 border border-[#c0284d] text-sm font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform"
+          className="min-h-[42px] px-3.5 rounded-xl bg-[#8a1030] hover:bg-[#a31439] disabled:opacity-60 border border-[#c0284d] text-xs sm:text-sm font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform"
         >
           <Video className="w-4 h-4" />
           <span>{recording ? 'Gravando...' : 'Gravar vídeo'}</span>
@@ -959,17 +1308,18 @@ export default function App() {
         <button
           type="button"
           onClick={saveCode}
-          className="min-h-[44px] px-3.5 rounded-xl bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-sm font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform"
+          title="Baixar todas_as_cenas.js unificado"
+          className="min-h-[42px] px-3 rounded-xl bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-xs sm:text-sm font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform"
         >
           <Download className="w-4 h-4" />
-          <span>Salvar código</span>
+          <span>Salvar .JS</span>
         </button>
 
         <button
           type="button"
           onClick={saveHtml}
-          title="Baixar arquivo showreel.html standalone idêntico ao Python"
-          className="min-h-[44px] px-3.5 rounded-xl bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-sm font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform"
+          title="Baixar showreel.html completo"
+          className="min-h-[42px] px-3 rounded-xl bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-xs sm:text-sm font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform"
         >
           <FileCode className="w-4 h-4 text-[#9496a8]" />
           <span>HTML</span>
@@ -982,7 +1332,7 @@ export default function App() {
           <a
             href={downloadVideo.url}
             download={downloadVideo.name}
-            className="inline-flex items-center gap-2 bg-[#12805a] hover:bg-[#15966a] text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold no-underline shadow-lg"
+            className="inline-flex items-center gap-2 bg-[#12805a] hover:bg-[#15966a] text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-bold no-underline shadow-lg"
           >
             <Download className="w-4 h-4" />
             <span>
@@ -992,34 +1342,207 @@ export default function App() {
         </div>
       )}
 
-      {/* <details><summary>Cenas / status</summary><pre id="log"></pre></details> */}
+      {/* Gaveta Inferior: Arquivos por Cena + Visão do Agente (Quadros 15%, 50%, 85%) + Log */}
       <div className="w-full max-w-2xl bg-[#101018] border border-[#252538] rounded-xl overflow-hidden shrink-0">
-        <button
-          type="button"
-          onClick={() => setLogExpanded((v) => !v)}
-          className="w-full px-3.5 py-2 flex items-center justify-between text-xs text-white/80 hover:text-white"
-        >
-          <span className="flex items-center gap-2 font-medium">
-            <Terminal className="w-3.5 h-3.5 text-[#e11d48]" />
-            <span>Cenas / status ({logs.length} linhas)</span>
-          </span>
-          {logExpanded ? (
-            <ChevronDown className="w-4 h-4" />
-          ) : (
-            <ChevronUp className="w-4 h-4" />
-          )}
-        </button>
-        {logExpanded && (
-          <pre
-            id="log"
-            className="px-3.5 pb-3 pt-1 text-[11px] font-mono text-white/75 whitespace-pre-wrap max-h-[22vh] overflow-y-auto border-t border-[#1e1e2d]"
+        <div className="w-full px-3.5 py-2 flex items-center justify-between text-xs text-white/85">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setDrawerTab('files');
+                setDrawerOpen(true);
+              }}
+              className={`flex items-center gap-1.5 font-medium ${
+                drawerOpen && drawerTab === 'files'
+                  ? 'text-[#e11d48]'
+                  : 'text-white/75 hover:text-white'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Arquivos & Visão do Agente ({data.scenes.length} cenas)</span>
+            </button>
+            <span className="opacity-30">·</span>
+            <button
+              type="button"
+              onClick={() => {
+                setDrawerTab('log');
+                setDrawerOpen(true);
+              }}
+              className={`flex items-center gap-1.5 font-medium ${
+                drawerOpen && drawerTab === 'log'
+                  ? 'text-[#e11d48]'
+                  : 'text-white/75 hover:text-white'
+              }`}
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              <span>Log ({logs.length})</span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setDrawerOpen((v) => !v)}
+            className="p-1 text-white/70 hover:text-white"
           >
-            {logs.join('\n')}
-          </pre>
+            {drawerOpen ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronUp className="w-4 h-4" />
+            )}
+          </button>
+        </div>
+
+        {drawerOpen && (
+          <div className="border-t border-[#1e1e2d] max-h-[20vh] sm:max-h-[26vh] overflow-y-auto p-3">
+            {drawerTab === 'files' ? (
+              <div className="space-y-2">
+                {data.dna.narrative_thread && (
+                  <div className="p-2.5 rounded-xl bg-[#141422] border border-[#2c2c44] text-xs space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-[#f59e0b]">
+                        Direção Criativa: {data.dna.estilo}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        {[
+                          data.dna.pal.bg1,
+                          data.dna.pal.bg2,
+                          data.dna.pal.acc,
+                          data.dna.pal.acc2,
+                          data.dna.pal.fg,
+                        ].map((hex, hIdx) => (
+                          <span
+                            key={hIdx}
+                            title={hex}
+                            style={{ backgroundColor: hex }}
+                            className="w-3 h-3 rounded-full border border-white/25 inline-block"
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-white/75 leading-relaxed">
+                      <b className="text-white/90">Fio Condutor:</b> {data.dna.narrative_thread}
+                    </p>
+                  </div>
+                )}
+
+                {data.scenes.map((s, idx) => {
+                  const ag = ((idx % 2) + 1) as 1 | 2;
+                  const fName =
+                    s.fileName || `cena_${String(idx + 1).padStart(2, '0')}_${s.role}.js`;
+                  const vc = s.visualCheck;
+                  return (
+                    <div
+                      key={idx}
+                      className="p-2.5 rounded-xl bg-[#0b0b12] border border-[#222234] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                    >
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs font-mono tabular-nums">
+                          <span className="font-bold text-white">{fName}</span>
+                          <span className="opacity-40">·</span>
+                          <span
+                            className={
+                              ag === 1 ? 'text-[#f43f5e]' : 'text-[#f59e0b]'
+                            }
+                          >
+                            Agente {ag} (Chave {ag})
+                          </span>
+                          <span className="opacity-40">·</span>
+                          <span className="text-white/60">{s.dur.toFixed(1)}s</span>
+                          {s.layout_mode && (
+                            <>
+                              <span className="opacity-40">·</span>
+                              <span className="text-[#10b981] text-[11px]">
+                                {s.layout_mode}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        <div className="text-xs font-semibold text-white truncate">
+                          &ldquo;{s.text}&rdquo; —{' '}
+                          <span className="font-normal text-white/65">{s.idea}</span>
+                        </div>
+                        <div className="text-[11px] text-[#10b981] truncate">
+                          🎙️ <b className="text-white/85">Voz & Escrita na Tela:</b> &ldquo;
+                          {s.narration || `${s.text}. ${s.sub || ''}`}&rdquo;
+                          {s.voiceAudioBase64 ? ' (Voz Neural Gemini)' : ' (Voz Sincronizada)'}
+                        </div>
+                        {s.visual_bridge && (
+                          <div className="text-[11px] text-white/55 truncate">
+                            ↳ <b className="text-white/75">Conexão:</b> {s.visual_bridge}
+                          </div>
+                        )}
+                        {vc && (
+                          <div className="flex items-center gap-1.5 text-[11px] font-mono text-white/75">
+                            {vc.repaired ? (
+                              <Wrench className="w-3.5 h-3.5 text-[#f59e0b] shrink-0" />
+                            ) : (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-[#10b981] shrink-0" />
+                            )}
+                            <span className="truncate">
+                              Mov: {vc.motionScore}% · Cob: {vc.coverageScore}% ·{' '}
+                              {vc.reviewNote}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Quadros que o Agente "Viu" (15%, 50%, 85%) + Botões do Arquivo Individual */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {vc?.snapshots && vc.snapshots.length > 0 && (
+                          <div
+                            className="flex items-center gap-1"
+                            title="Quadros inspecionados pelo Agente (15%, 50%, 85%)"
+                          >
+                            {vc.snapshots.map((snap, sIdx) => (
+                              <img
+                                key={sIdx}
+                                src={snap}
+                                alt={`Cena ${idx + 1} frame ${sIdx + 1}`}
+                                className="w-7 h-12 object-cover rounded border border-white/15 bg-black"
+                              />
+                            ))}
+                          </div>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingSceneIdx(idx);
+                            setDraftSceneCode(s.code || '');
+                          }}
+                          className="h-8 px-2.5 rounded-lg bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-[11px] text-white flex items-center gap-1"
+                        >
+                          <Code2 className="w-3 h-3 text-[#f59e0b]" />
+                          <span>Código</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => downloadSingleSceneFile(s, idx)}
+                          title={`Baixar ${fName}`}
+                          className="h-8 px-2.5 rounded-lg bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-[11px] text-white flex items-center gap-1"
+                        >
+                          <Download className="w-3 h-3 text-[#10b981]" />
+                          <span>.JS</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <pre
+                id="log"
+                className="text-[11px] font-mono text-white/75 whitespace-pre-wrap"
+              >
+                {logs.join('\n')}
+              </pre>
+            )}
+          </div>
         )}
       </div>
 
-      {/* ====================== MODAL DA ENGRENAGEM ⚙️ (CHAVE 1 E CHAVE 2 DA GEMINI + CONFIG) ====================== */}
+      {/* ====================== MODAL DA ENGRENAGEM ⚙️ (AGENTE 1 = CHAVE 1 | AGENTE 2 = CHAVE 2) ====================== */}
       {settingsOpen && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="w-full max-w-lg bg-[#12121c] border-t sm:border border-[#2e2e44] rounded-t-3xl sm:rounded-2xl p-5 sm:p-6 max-h-[90dvh] overflow-y-auto space-y-4">
@@ -1027,7 +1550,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <Settings className="w-5 h-5 text-[#e11d48]" />
                 <h2 className="text-base font-bold text-white">
-                  Configuração do Agente & Chaves Gemini
+                  Configuração dos 2 Agentes Gemini
                 </h2>
               </div>
               <button
@@ -1039,17 +1562,17 @@ export default function App() {
               </button>
             </div>
 
-            {/* Chave 1 */}
+            {/* Chave 1 -> Agente 1 */}
             <div>
               <label className="block text-xs font-semibold text-white/90 mb-1">
-                GEMINI_API_KEY_1 (Chave 1 da Gemini)
+                GEMINI_API_KEY_1 — Agente 1 (Cenas Ímpares: Cena 1, 3, 5, 7...)
               </label>
               <div className="relative flex items-center">
                 <input
                   type={showKey1 ? 'text' : 'password'}
                   value={key1}
                   onChange={(e) => setKey1(e.target.value)}
-                  placeholder="Cole aqui a Chave 1 (vazio = modo offline)"
+                  placeholder="Cole aqui a Chave 1 da Gemini"
                   className="w-full h-11 pl-3.5 pr-10 rounded-xl bg-[#07070b] border border-[#2c2c42] focus:border-[#e11d48] focus:outline-none font-mono text-xs text-white"
                 />
                 <button
@@ -1062,17 +1585,17 @@ export default function App() {
               </div>
             </div>
 
-            {/* Chave 2 */}
+            {/* Chave 2 -> Agente 2 */}
             <div>
               <label className="block text-xs font-semibold text-white/90 mb-1">
-                GEMINI_API_KEY_2 (Chave 2 opcional — alterna por cena)
+                GEMINI_API_KEY_2 — Agente 2 (Cenas Pares: Cena 2, 4, 6, 8...)
               </label>
               <div className="relative flex items-center">
                 <input
                   type={showKey2 ? 'text' : 'password'}
                   value={key2}
                   onChange={(e) => setKey2(e.target.value)}
-                  placeholder="Cole aqui a Chave 2 para alternar entre as cenas"
+                  placeholder="Cole aqui a Chave 2 da Gemini"
                   className="w-full h-11 pl-3.5 pr-10 rounded-xl bg-[#07070b] border border-[#2c2c42] focus:border-[#e11d48] focus:outline-none font-mono text-xs text-white"
                 />
                 <button
@@ -1084,7 +1607,7 @@ export default function App() {
                 </button>
               </div>
               <p className="text-[11px] text-white/55 mt-1">
-                Se preencher as duas, a Cena 1 usa a Chave 1, a Cena 2 usa a Chave 2, etc., evitando limite de requisição gratuita.
+                O Agente 1 (Chave 1) cria e salva as cenas 1, 3, 5... e o Agente 2 (Chave 2) cria e salva as cenas 2, 4, 6..., dividindo a carga ao meio.
               </p>
             </div>
 
@@ -1178,7 +1701,7 @@ export default function App() {
 
               <div>
                 <label className="block text-xs text-white/80 mb-1">
-                  REAPROVEITAR (0 a 1)
+                  REAPROVEITAR (0 = criar 100% inédito)
                 </label>
                 <input
                   type="number"
@@ -1205,6 +1728,23 @@ export default function App() {
                   className="w-full h-10 px-3 rounded-xl bg-[#07070b] border border-[#2c2c42] font-mono text-xs text-white"
                 />
               </div>
+
+              <div className="col-span-2">
+                <label className="block text-xs text-white/80 mb-1">
+                  VOZ DO NARRADOR (Gemini Neural TTS + Sincronia na Tela)
+                </label>
+                <select
+                  value={voiceName}
+                  onChange={(e) => setVoiceName(e.target.value)}
+                  className="w-full h-10 px-3 rounded-xl bg-[#07070b] border border-[#2c2c42] font-mono text-xs text-white"
+                >
+                  <option value="Aoede">Aoede (Feminina Natural & Expressiva)</option>
+                  <option value="Kore">Kore (Feminina Firme & Comercial)</option>
+                  <option value="Puck">Puck (Masculina Dinâmica & Jovem)</option>
+                  <option value="Charon">Charon (Masculina Grave & Cinematográfica)</option>
+                  <option value="Fenrir">Fenrir (Masculina Forte & Impactante)</option>
+                </select>
+              </div>
             </div>
 
             <div className="pt-2 flex items-center justify-end gap-2">
@@ -1221,14 +1761,16 @@ export default function App() {
         </div>
       )}
 
-      {/* ====================== MODAL DE EDIÇÃO DE CENA AO VIVO ====================== */}
+      {/* ====================== MODAL DE EDIÇÃO DO ARQUIVO DA CENA ====================== */}
       {editingSceneIdx !== null && data.scenes[editingSceneIdx] && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="w-full max-w-lg bg-[#12121c] border-t sm:border border-[#2e2e44] rounded-t-3xl sm:rounded-2xl p-5 space-y-3 max-h-[88dvh] flex flex-col">
             <div className="flex items-center justify-between pb-2 border-b border-[#252538]">
               <div>
                 <span className="text-xs font-mono text-white/60">
-                  Cena {editingSceneIdx + 1} [{data.scenes[editingSceneIdx].role}] ·{' '}
+                  {data.scenes[editingSceneIdx].fileName ||
+                    `cena_0${editingSceneIdx + 1}.js`}{' '}
+                  · Agente {((editingSceneIdx % 2) + 1) as 1 | 2} ·{' '}
                   {data.scenes[editingSceneIdx].origem}
                 </span>
                 <h3 className="text-sm font-bold text-white">
@@ -1248,7 +1790,7 @@ export default function App() {
               value={draftSceneCode}
               onChange={(e) => setDraftSceneCode(e.target.value)}
               spellCheck={false}
-              placeholder="// Corpo da função (ctx, t, ts, W, H, P, M) — vazio usa o fallback"
+              placeholder="// Corpo da função (ctx, t, ts, W, H, P, M)"
               className="w-full flex-1 min-h-[220px] p-3 rounded-xl bg-[#07070b] border border-[#2c2c42] font-mono text-xs text-white/90 resize-none focus:border-[#e11d48] focus:outline-none"
             />
 
@@ -1257,39 +1799,44 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   const idx = editingSceneIdx;
-                  setData((prev) => ({
-                    ...prev,
-                    scenes: prev.scenes.map((s, i) =>
-                      i === idx
-                        ? {
-                            ...s,
-                            code: draftSceneCode.trim() || null,
-                            origem: draftSceneCode.trim() ? 'gemini' : 'fallback',
-                          }
-                        : s
-                    ),
-                  }));
+                  setData((prev) => {
+                    const updatedScenes = prev.scenes.map((s, i) => {
+                      if (i !== idx) return s;
+                      const nextScene: SceneSpec = {
+                        ...s,
+                        code: draftSceneCode.trim() || null,
+                        origem: draftSceneCode.trim() ? 'gemini' : 'fallback',
+                      };
+                      const check = inspectSceneFrames(nextScene, idx, prev);
+                      nextScene.visualCheck = {
+                        passed: check.passed,
+                        motionScore: check.motionScore,
+                        coverageScore: check.coverageScore,
+                        reviewNote: check.diagnosticReason,
+                        snapshots: check.snapshots,
+                      };
+                      return nextScene;
+                    });
+                    return { ...prev, scenes: updatedScenes };
+                  });
                   setEditingSceneIdx(null);
                 }}
                 className="flex-1 h-11 rounded-xl bg-[#e11d48] hover:bg-[#be123c] text-xs font-semibold text-white"
               >
-                Aplicar na Cena {editingSceneIdx + 1}
+                Salvar e Inspecionar {data.scenes[editingSceneIdx].fileName}
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  const idx = editingSceneIdx;
-                  setData((prev) => ({
-                    ...prev,
-                    scenes: prev.scenes.map((s, i) =>
-                      i === idx ? { ...s, code: null, origem: 'fallback' } : s
-                    ),
-                  }));
-                  setEditingSceneIdx(null);
-                }}
-                className="h-11 px-4 rounded-xl bg-[#1b1b28] border border-[#33334a] text-xs text-white/80"
+                onClick={() =>
+                  downloadSingleSceneFile(
+                    data.scenes[editingSceneIdx],
+                    editingSceneIdx
+                  )
+                }
+                className="h-11 px-4 rounded-xl bg-[#1b1b28] border border-[#33334a] text-xs text-white/85 flex items-center gap-1.5"
               >
-                Usar Fallback ({data.scenes[editingSceneIdx].fb})
+                <Download className="w-3.5 h-3.5 text-[#10b981]" />
+                <span>Baixar .JS</span>
               </button>
             </div>
           </div>
