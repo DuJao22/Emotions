@@ -42,7 +42,10 @@ export class ShowreelAudioSynth {
     this.init();
     if (this.ac && this.ac.state === 'suspended') {
       try {
-        await this.ac.resume();
+        await Promise.race([
+          this.ac.resume(),
+          new Promise<void>((resolve) => setTimeout(resolve, 150)),
+        ]);
       } catch {
         // Ignore autoplay restriction errors until user gesture
       }

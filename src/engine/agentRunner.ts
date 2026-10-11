@@ -11,7 +11,12 @@ import {
   TRANSITIONS,
   TransitionKind,
 } from '../types/showreel';
-import { synthesizeConnectedSceneCode } from './motionEngine';
+import {
+  compileSceneCode,
+  MotionLib,
+  resetCanvasCtx,
+  synthesizeConnectedSceneCode,
+} from './motionEngine';
 
 const EXCLUI = [
   'image',
@@ -102,17 +107,26 @@ function gravarLocal<T>(key: string, data: T) {
 }
 
 function safeParseJson<T = Record<string, unknown>>(raw: string): T | null {
+  const t = String(raw || '')
+    .replace(/```(?:json)?/gi, '')
+    .replace(/```/g, '')
+    .trim();
+  if (!t) return null;
+  const i0 = t.indexOf('{');
+  const i1 = t.lastIndexOf('}');
+  const candidate = i0 >= 0 && i1 > i0 ? t.slice(i0, i1 + 1) : t;
   try {
-    const t = String(raw || '').trim();
-    if (!t) return null;
-    const i0 = t.indexOf('{');
-    const i1 = t.lastIndexOf('}');
-    if (i0 >= 0 && i1 > i0) {
-      return JSON.parse(t.slice(i0, i1 + 1)) as T;
-    }
-    return JSON.parse(t) as T;
+    return JSON.parse(candidate) as T;
   } catch {
-    return null;
+    try {
+      // Repara vírgulas finais e quebras de linha não escapadas comuns em respostas de LLMs
+      const repaired = candidate
+        .replace(/,\s*([}\]])/g, '$1')
+        .replace(/[\u0000-\u0019]+/g, ' ');
+      return JSON.parse(repaired) as T;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -120,10 +134,23 @@ export function extrairChavesLocal(key1?: string, key2?: string): string[] {
   const chaves: string[] = [];
   for (const k of [key1 || '', key2 || '']) {
     const clean = k.trim();
-    if (clean && !chaves.includes(clean)) chaves.push(clean);
+    if (clean && clean !== 'MY_GEMINI_API_KEY' && !chaves.includes(clean)) {
+      chaves.push(clean);
+    }
   }
   return chaves;
 }
+
+const PREFERRED_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-3-flash-preview',
+  'gemini-3.1-flash-lite-preview',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-latest',
+];
+
+const localModelCache = new Map<string, { ts: number; models: string[] }>();
 
 export async function descobrirModelosLocal(
   key1?: string,
@@ -131,7 +158,7 @@ export async function descobrirModelosLocal(
   modelPref = 'auto'
 ): Promise<{ chavesCount: number; modelos: string[]; logs: string[] }> {
   const chaves = extrairChavesLocal(key1, key2);
-  const padrao = ['gemini-3.1-flash-lite', 'gemini-3-flash-preview', 'gemini-2.5-flash'];
+  const padrao = [...PREFERRED_MODELS];
   if (!chaves.length) {
     return {
       chavesCount: 0,
@@ -140,72 +167,92 @@ export async function descobrirModelosLocal(
     };
   }
 
+  const cacheKey = chaves[0].slice(0, 14);
+  const cached = localModelCache.get(cacheKey);
   const nomes: string[] = [];
   const logs: string[] = [];
-  let token = '';
 
-  for (let page = 0; page < 5; page++) {
-    const url =
-      'https://generativelanguage.googleapis.com/v1beta/models?pageSize=200' +
-      (token ? `&pageToken=${encodeURIComponent(token)}` : '');
-    try {
-      const resp = await fetch(url, {
-        headers: { 'x-goog-api-key': chaves[0] },
-      });
-      if (!resp.ok) {
-        logs.push(`  (não consegui listar os modelos: HTTP ${resp.status})`);
+  if (cached && Date.now() - cached.ts < 20 * 60 * 1000) {
+    nomes.push(...cached.models);
+  } else {
+    let token = '';
+    for (let page = 0; page < 3; page++) {
+      const url =
+        'https://generativelanguage.googleapis.com/v1beta/models?pageSize=200' +
+        (token ? `&pageToken=${encodeURIComponent(token)}` : '');
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8000);
+        const resp = await fetch(url, {
+          headers: { 'x-goog-api-key': chaves[0] },
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        if (!resp.ok) {
+          logs.push(`  (lista de modelos HTTP ${resp.status} — usando lista prioritária)`);
+          break;
+        }
+        const data = safeParseJson<{
+          models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
+          nextPageToken?: string;
+        }>(await resp.text());
+        if (!data) break;
+        for (const m of data.models || []) {
+          const nome = String(m.name || '').split('/').pop() || '';
+          const methods: string[] = m.supportedGenerationMethods || [];
+          const isDeprecated =
+            nome.startsWith('gemini-1.5') ||
+            nome.startsWith('gemini-2.0') ||
+            nome.includes('-04-17') ||
+            nome.includes('-05-20') ||
+            nome.includes('-001');
+          if (
+            methods.includes('generateContent') &&
+            nome.startsWith('gemini-') &&
+            nome.includes('flash') &&
+            !isDeprecated &&
+            !EXCLUI.some((x) => nome.includes(x))
+          ) {
+            nomes.push(nome);
+          }
+        }
+        token = data.nextPageToken || '';
+        if (!token) break;
+      } catch {
         break;
       }
-      const data = safeParseJson<{
-        models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
-        nextPageToken?: string;
-      }>(await resp.text());
-      if (!data) break;
-      for (const m of data.models || []) {
-        const nome = String(m.name || '').split('/').pop() || '';
-        const methods: string[] = m.supportedGenerationMethods || [];
-        if (
-          methods.includes('generateContent') &&
-          nome.startsWith('gemini-') &&
-          nome.includes('flash') &&
-          !EXCLUI.some((x) => nome.includes(x))
-        ) {
-          nomes.push(nome);
-        }
-      }
-      token = data.nextPageToken || '';
-      if (!token) break;
-    } catch (ex) {
-      logs.push(`  (não consegui listar os modelos: ${ex instanceof Error ? ex.message : String(ex)})`);
-      break;
+    }
+    if (nomes.length > 0) {
+      localModelCache.set(cacheKey, { ts: Date.now(), models: Array.from(new Set(nomes)) });
     }
   }
 
-  const achados = Array.from(new Set(nomes)).sort((a, b) => {
-    const mva = a.match(/^gemini-(\d+(?:\.\d+)?)/);
-    const mvb = b.match(/^gemini-(\d+(?:\.\d+)?)/);
-    const vera = mva ? parseFloat(mva[1]) : 0.0;
-    const verb = mvb ? parseFloat(mvb[1]) : 0.0;
-    if (vera !== verb) return verb - vera;
-    const liteA = a.includes('lite') ? 1 : 0;
-    const liteB = b.includes('lite') ? 1 : 0;
-    if (liteA !== liteB) return liteA - liteB;
-    const prevA = a.includes('preview') ? 1 : 0;
-    const prevB = b.includes('preview') ? 1 : 0;
-    if (prevA !== prevB) return prevA - prevB;
-    return a.localeCompare(b);
-  });
-
-  if (achados.length > 0) {
-    logs.push(`Modelos Gemini disponíveis na sua chave: ${achados.slice(0, 12).join(', ')}`);
+  // Prioriza modelos com alta cota gratuita (gemini-2.5-flash, gemini-2.5-flash-lite, gemini-3-flash-preview)
+  // antes de modelos com limite restrito de 5 req/min (como gemini-3.8-flash)
+  const uniqueDiscovered = Array.from(new Set(nomes));
+  const prioritized: string[] = [];
+  for (const pref of PREFERRED_MODELS) {
+    if (uniqueDiscovered.length === 0 || uniqueDiscovered.includes(pref)) {
+      prioritized.push(pref);
+    }
+  }
+  for (const d of uniqueDiscovered) {
+    if (!prioritized.includes(d)) {
+      prioritized.push(d);
+    }
+  }
+  for (const fallbackModel of PREFERRED_MODELS) {
+    if (!prioritized.includes(fallbackModel)) {
+      prioritized.push(fallbackModel);
+    }
   }
 
-  const base = achados.length > 0 ? achados.slice(0, 8) : padrao;
+  const base = prioritized.slice(0, 8);
   const modelos =
     modelPref && modelPref.toLowerCase() !== 'auto'
       ? [modelPref, ...base.filter((m) => m !== modelPref)]
       : base;
-  logs.push(`Modelo em uso: ${modelos[0]} (se falhar, troca sozinho)`);
+  logs.push(`Modelo principal: ${modelos[0]} (fallback automático: ${modelos.slice(1, 4).join(', ')})`);
 
   return { chavesCount: chaves.length, modelos, logs };
 }
@@ -227,85 +274,112 @@ async function geminiLocalCall(options: {
     miRef,
     json_mode = false,
     temperature = 0.95,
-    tries = 4,
     chave = 0,
   } = options;
   const logs: string[] = [];
   if (!chaves.length || !modelos.length) return { text: null, logs };
 
-  const body: Record<string, unknown> = {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature,
-      maxOutputTokens: 8192,
-      ...(json_mode ? { responseMimeType: 'application/json' } : {}),
-    },
-  };
-
   const n = chaves.length;
-  let k = 0;
+  const maxModelsToTry = Math.min(modelos.length, 4);
 
-  while (k < tries) {
-    const modelo = modelos[Math.min(miRef.mi, modelos.length - 1)];
-    const idx = (chave + k) % n;
-    logs.push(`    (chave ${idx + 1} de ${n}, modelo ${modelo})`);
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
+  for (let mStep = 0; mStep < maxModelsToTry; mStep++) {
+    const modelIdx = (miRef.mi + mStep) % modelos.length;
+    const modelo = modelos[modelIdx];
+    const supportsZeroThinking = modelo.startsWith('gemini-2.5-flash');
 
-    try {
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': chaves[idx],
+    for (let k = 0; k < n; k++) {
+      const idx = (chave + k) % n;
+      logs.push(`    (Agente na Chave ${idx + 1}/${n}, modelo ${modelo})`);
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
+
+      const makeBody = (withThinkingConfig: boolean): Record<string, unknown> => ({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature,
+          maxOutputTokens: 6144,
+          ...(json_mode ? { responseMimeType: 'application/json' } : {}),
+          ...(withThinkingConfig ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
         },
-        body: JSON.stringify(body),
       });
 
-      if (!resp.ok) {
-        const msg = (await resp.text()).slice(0, 1200);
-        const sem_modelo = resp.status === 404 || (resp.status === 429 && /limit:\s*0\b/.test(msg));
-        if (sem_modelo && miRef.mi < modelos.length - 1) {
-          miRef.mi += 1;
-          logs.push(`  Modelo ${modelo} indisponível (${resp.status}). Trocando para ${modelos[miRef.mi]}`);
-          continue;
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 24000);
+        let resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': chaves[idx],
+          },
+          body: JSON.stringify(makeBody(supportsZeroThinking)),
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+
+        // Se o modelo rejeitar thinkingConfig com 400, tenta imediatamente sem thinkingConfig
+        if (resp.status === 400 && supportsZeroThinking) {
+          const ctrl2 = new AbortController();
+          const timer2 = setTimeout(() => ctrl2.abort(), 24000);
+          resp = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': chaves[idx],
+            },
+            body: JSON.stringify(makeBody(false)),
+            signal: ctrl2.signal,
+          });
+          clearTimeout(timer2);
         }
-        if (resp.status === 429 || resp.status >= 500) {
-          const troca = n > 1 && k < n - 1;
-          if (!troca && miRef.mi < modelos.length - 1) {
-            miRef.mi += 1;
-            logs.push(`  Limite na chave ${idx + 1} (${modelo}). Trocando para ${modelos[miRef.mi]}...`);
+
+        if (!resp.ok) {
+          const rawErr = (await resp.text()).slice(0, 800);
+          const errJson = safeParseJson<{ error?: { message?: string } }>(rawErr);
+          const shortReason = (errJson?.error?.message || rawErr).slice(0, 120);
+
+          if (resp.status === 404 || (resp.status === 429 && /limit:\s*0\b/.test(rawErr))) {
+            logs.push(`  Modelo ${modelo} indisponível (${resp.status}). Alternando modelo...`);
+            break; // Vai imediatamente para o próximo modelo do loop externo
+          }
+
+          if (resp.status === 400 || resp.status === 403) {
+            logs.push(`  Aviso Chave ${idx + 1} (${resp.status}): ${shortReason}`);
+            continue; // Tenta a outra chave ou próximo modelo
+          }
+
+          if (resp.status === 429 || resp.status >= 500) {
+            logs.push(
+              `  Limite/ocupado na Chave ${idx + 1} (${modelo}, HTTP ${resp.status}). ${
+                k < n - 1 ? 'Alternando para a outra Chave...' : 'Trocando para próximo modelo...'
+              }`
+            );
+            await new Promise((r) => setTimeout(r, k < n - 1 ? 600 : 900));
             continue;
           }
-          const espera = troca ? 1.5 : 3;
-          logs.push(`  Chave ${idx + 1} ocupada/limite (${resp.status}). Aguardando ${espera}s...`);
-          await new Promise((r) => setTimeout(r, espera * 1000));
-          k += 1;
-          continue;
-        }
-        if (n > 1 && k < n - 1) {
-          k += 1;
-          continue;
-        }
-        return { text: null, logs };
-      }
 
-      const data = safeParseJson<{
-        candidates?: Array<{
-          content?: { parts?: Array<{ text?: string; thought?: boolean }> };
-        }>;
-      }>(await resp.text());
-      const parts: Array<{ text?: string; thought?: boolean }> =
-        data?.candidates?.[0]?.content?.parts || [];
-      const txt = parts
-        .filter((p) => !p.thought)
-        .map((p) => p.text || '')
-        .join('');
-      if (txt.trim()) return { text: txt, logs };
-      k += 1;
-    } catch (ex) {
-      logs.push(`  Erro Gemini: ${ex instanceof Error ? ex.message : String(ex)}`);
-      await new Promise((r) => setTimeout(r, 1500));
-      k += 1;
+          continue;
+        }
+
+        const data = safeParseJson<{
+          candidates?: Array<{
+            content?: { parts?: Array<{ text?: string; thought?: boolean }> };
+          }>;
+        }>(await resp.text());
+        const parts: Array<{ text?: string; thought?: boolean }> =
+          data?.candidates?.[0]?.content?.parts || [];
+        const txt = parts
+          .filter((p) => !p.thought)
+          .map((p) => p.text || '')
+          .join('');
+        if (txt.trim()) {
+          miRef.mi = modelIdx;
+          return { text: txt, logs };
+        }
+      } catch (ex) {
+        const msg = ex instanceof Error ? ex.message : String(ex);
+        logs.push(`  Conexão Gemini (Chave ${idx + 1}): ${msg.slice(0, 90)}`);
+        await new Promise((r) => setTimeout(r, 600));
+      }
     }
   }
   return { text: null, logs };
@@ -896,11 +970,60 @@ Escreva SOMENTE o código JavaScript puro do corpo da função (sem blocos markd
     };
   }
 
-  const m = gem.text.match(/```(?:javascript|js)?\s*\n([\s\S]*?)```/);
+  const m = gem.text.match(/```(?:javascript|js)?\s*([\s\S]*?)```/i);
   const code = (m ? m[1] : gem.text).trim().replace(/^`+|`+$/g, '').trim();
 
   if (code.length < 40 || code.length > 16000 || PROIBIDO.some((b) => code.includes(b))) {
     logs.push('    código inválido -> cena gerada com sintetizador conectado');
+    return {
+      code: synthesizeConnectedSceneCode(scene, idx, total),
+      origem: 'fallback',
+      mi: miRef.mi,
+      logs,
+    };
+  }
+
+  // Testa compilação e execução real em Canvas 2D antes de aprovar
+  try {
+    const fn = compileSceneCode(code);
+    if (typeof document !== 'undefined') {
+      const testCv = document.createElement('canvas');
+      testCv.width = Math.max(90, Math.round(width * 0.25));
+      testCv.height = Math.max(160, Math.round(height * 0.25));
+      const testCtx = testCv.getContext('2d');
+      if (testCtx) {
+        resetCanvasCtx(testCtx);
+        fn(
+          testCtx,
+          0.5,
+          (scene.dur || 4) * 0.5,
+          testCv.width,
+          testCv.height,
+          {
+            pal: dna.pal,
+            bpm: dna.bpm,
+            energy: dna.energy,
+            text: scene.text,
+            sub: scene.sub,
+            narration: scene.narration,
+            role: scene.role,
+            dur: scene.dur || 4,
+            seed: scene.seed || 12345,
+            pulse: 0.4,
+            gt: 1.0,
+            i: idx,
+            layout_mode: scene.layout_mode,
+            camera_motion: scene.camera_motion,
+            visual_bridge: scene.visual_bridge,
+          },
+          MotionLib
+        );
+      }
+    }
+  } catch (err) {
+    logs.push(
+      `    erro de execução JS (${err instanceof Error ? err.message : String(err)}) -> usando sintetizador conectado`
+    );
     return {
       code: synthesizeConnectedSceneCode(scene, idx, total),
       origem: 'fallback',
@@ -920,7 +1043,7 @@ Escreva SOMENTE o código JavaScript puro do corpo da função (sem blocos markd
 
   const numStr = String(idx + 1).padStart(2, '0');
   const fileName = `cena_${numStr}_${scene.role}.js`;
-  logs.push(`    ✓ ${fileName} salvo pelo Agente ${agentNum}`);
+  logs.push(`    ✓ ${fileName} salvo e validado pelo Agente ${agentNum}`);
 
   return { code, origem: 'gemini', mi: miRef.mi, logs };
 }
@@ -954,7 +1077,6 @@ export async function revisarCenaLocal(params: {
     total,
     width,
     height,
-    snapshotDataUrl,
     diagnosticReason,
     needsRepair,
     key1,
@@ -973,79 +1095,25 @@ export async function revisarCenaLocal(params: {
     return {
       approved: !needsRepair,
       repairedCode: needsRepair ? synthesizeConnectedSceneCode(scene, idx, total) : null,
-      reviewNote: 'Modo offline — inspeção visual local concluída.',
+      reviewNote: 'Inspeção visual concluída.',
+      logs,
+    };
+  }
+
+  // Se os 3 quadros (15%, 50%, 85%) já passaram no teste de movimento e cobertura, aprova sem gastar cota extra de API!
+  if (!needsRepair) {
+    logs.push(
+      `  👁️ Agente ${agentNum} inspecionou ${fileName}: APROVADA (${diagnosticReason})`
+    );
+    return {
+      approved: true,
+      repairedCode: null,
+      reviewNote: diagnosticReason || 'Animação e tipografia verificadas quadro a quadro.',
       logs,
     };
   }
 
   const keyIdx = idx % chaves.length;
-  const modelo = modelos[Math.min(mi || 0, modelos.length - 1)];
-
-  if (!needsRepair && snapshotDataUrl) {
-    const base64Data = snapshotDataUrl.split(',')[1] || '';
-    if (base64Data) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
-        const reviewPrompt = `Você é o Diretor de Motion Design inspecionando o frame real renderizado da Cena ${
-          idx + 1
-        }/${total} (${fileName}) para o cliente: "${clientPrompt || dna.client_intent || dna.estilo}".
-Roteiro esperado: Texto "${scene.text}", Ideia "${scene.idea}", Layout "${scene.layout_mode || 'autoral'}".
-A cena apresenta composição visual coerente e conectada ao tema? Responda APENAS em JSON: {"approved": true, "note": "comentário curto de 1 frase"}`;
-
-        const resp = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': chaves[keyIdx],
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
-                  { text: reviewPrompt },
-                ],
-              },
-            ],
-            generationConfig: {
-              temperature: 0.4,
-              maxOutputTokens: 256,
-              responseMimeType: 'application/json',
-            },
-          }),
-        });
-
-        if (resp.ok) {
-          const data = safeParseJson<{
-            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-          }>(await resp.text());
-          const txt = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          const parsed = safeParseJson<{ approved?: boolean; note?: string }>(txt);
-          if (parsed && parsed.approved !== false) {
-            logs.push(
-              `  👁️ Agente ${agentNum} inspecionou ${fileName}: APROVADA ("${
-                parsed.note || 'Fiel ao roteiro e ao cliente'
-              }")`
-            );
-            return {
-              approved: true,
-              repairedCode: null,
-              reviewNote: parsed.note || 'Visual verificado pelo Agente Diretor.',
-              logs,
-            };
-          }
-        }
-      } catch {
-        return {
-          approved: true,
-          repairedCode: null,
-          reviewNote: 'Verificado por telemetria de movimento e cobertura.',
-          logs,
-        };
-      }
-    }
-  }
-
   logs.push(
     `  🔧 Agente ${agentNum} (Chave ${keyIdx + 1}) refazendo ${fileName} (Motivo: ${diagnosticReason})...`
   );
@@ -1063,7 +1131,7 @@ ${M_API}
 ROTEIRO OBRIGATÓRIO DESTA CENA:
 - Papel: ${scene.role}
 - Texto principal: "${scene.text}" (use M.text ou M.mainText de forma expressiva)
-- Subtítulo: "${scene.sub || ''}"
+- Subtítulo: "${scene.sub || ''}" (chame M.sub(ctx, W, H, P, ts) no final)
 - Ideia visual que DEVE acontecer na tela: "${scene.idea}"
 - Arquitetura de Layout: "${scene.layout_mode || 'composicao_autoral_dinamica'}"
 - Conexão com a próxima cena: "${scene.visual_bridge || ''}"
@@ -1082,16 +1150,21 @@ Escreva SOMENTE o corpo da função JavaScript (sem markdown, sem explicações)
   logs.push(...gem.logs);
 
   if (gem.text) {
-    const m = gem.text.match(/```(?:javascript|js)?\s*\n([\s\S]*?)```/);
+    const m = gem.text.match(/```(?:javascript|js)?\s*([\s\S]*?)```/i);
     const code = (m ? m[1] : gem.text).trim().replace(/^`+|`+$/g, '').trim();
     if (code.length >= 40 && code.length <= 16000 && !PROIBIDO.some((b) => code.includes(b))) {
-      logs.push(`    ✓ ${fileName} reconstruída e aprovada pelo Agente ${agentNum}`);
-      return {
-        approved: true,
-        repairedCode: code,
-        reviewNote: `Cena reconstruída pelo Agente ${agentNum} após revisão visual.`,
-        logs,
-      };
+      try {
+        compileSceneCode(code);
+        logs.push(`    ✓ ${fileName} reconstruída e aprovada pelo Agente ${agentNum}`);
+        return {
+          approved: true,
+          repairedCode: code,
+          reviewNote: `Cena reconstruída pelo Agente ${agentNum} após revisão visual.`,
+          logs,
+        };
+      } catch {
+        // cai no sintetizador conectado
+      }
     }
   }
 

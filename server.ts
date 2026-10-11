@@ -243,31 +243,60 @@ async function descobrir_modelos(chave0: string): Promise<{ models: string[]; lo
   return { models: unique, logs };
 }
 
+const PREFERRED_SERVER_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-3-flash-preview',
+  'gemini-3.1-flash-lite-preview',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-latest',
+];
+
 async function preparar_modelos(
   chaves: string[],
   geminiModelPref = 'auto'
 ): Promise<{ modelos: string[]; logs: string[] }> {
   const logs: string[] = [];
-  const padrao = ['gemini-3.1-flash-lite', 'gemini-3-flash-preview', 'gemini-2.5-flash'];
   let achados: string[] = [];
 
   if (chaves.length > 0) {
     const disc = await descobrir_modelos(chaves[0]);
-    achados = disc.models;
+    achados = disc.models.filter(
+      (m) =>
+        !m.startsWith('gemini-1.5') &&
+        !m.startsWith('gemini-2.0') &&
+        !m.includes('-04-17') &&
+        !m.includes('-05-20') &&
+        !m.includes('-001')
+    );
     logs.push(...disc.logs);
-    if (achados.length > 0) {
-      logs.push(`Modelos Gemini disponíveis na sua chave: ${achados.slice(0, 12).join(', ')}`);
+  }
+
+  const prioritized: string[] = [];
+  for (const pref of PREFERRED_SERVER_MODELS) {
+    if (achados.length === 0 || achados.includes(pref)) {
+      prioritized.push(pref);
+    }
+  }
+  for (const d of achados) {
+    if (!prioritized.includes(d)) {
+      prioritized.push(d);
+    }
+  }
+  for (const fb of PREFERRED_SERVER_MODELS) {
+    if (!prioritized.includes(fb)) {
+      prioritized.push(fb);
     }
   }
 
-  const base = achados.length > 0 ? achados.slice(0, 8) : padrao;
+  const base = prioritized.slice(0, 8);
   let modelos: string[];
   if (geminiModelPref && geminiModelPref.toLowerCase() !== 'auto') {
     modelos = [geminiModelPref, ...base.filter((m) => m !== geminiModelPref)];
   } else {
     modelos = base;
   }
-  logs.push(`Modelo em uso: ${modelos[0]} (se falhar, troca sozinho)`);
+  logs.push(`Modelo principal: ${modelos[0]} (fallback automático: ${modelos.slice(1, 4).join(', ')})`);
   return { modelos, logs };
 }
 

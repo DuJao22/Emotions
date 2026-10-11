@@ -58,22 +58,29 @@ interface CompiledScene extends SceneSpec {
 
 const TR = 0.32;
 
+declare const __ENV_GEMINI_KEY_1__: string | undefined;
+declare const __ENV_GEMINI_KEY_2__: string | undefined;
+
 async function safeApiPost<T>(url: string, payload: Record<string, unknown>): Promise<T | null> {
-  // No Vercel (*.vercel.app), quando o usuário já colou as chaves na UI, roda direto pelo navegador (agentRunner)
-  // para evitar o limite de 10s de Serverless Function e qualquer erro 500 "A server error has occurred".
+  // Se o usuário já tem Chave 1 ou Chave 2 no navegador, ou se está no domínio estático do Vercel,
+  // roda 100% direto pelo agentRunner no navegador (zero latência de proxy, sem timeout de 10s e sem erro 500).
   if (
-    typeof window !== 'undefined' &&
-    window.location.hostname.endsWith('.vercel.app') &&
-    (payload.key1 || payload.key2)
+    payload.key1 ||
+    payload.key2 ||
+    (typeof window !== 'undefined' && window.location.hostname.endsWith('.vercel.app'))
   ) {
     return null;
   }
   try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: ctrl.signal,
     });
+    clearTimeout(timer);
     if (!res.ok) return null;
     const raw = await res.text();
     const trimmed = raw.trim();
@@ -85,9 +92,19 @@ async function safeApiPost<T>(url: string, payload: Record<string, unknown>): Pr
 }
 
 export default function App() {
-  // ====================== CONFIGURAÇÃO (Persistida no navegador) ======================
-  const [key1, setKey1] = useState<string>(() => localStorage.getItem('GEMINI_API_KEY_1') || '');
-  const [key2, setKey2] = useState<string>(() => localStorage.getItem('GEMINI_API_KEY_2') || '');
+  // ====================== CONFIGURAÇÃO (Persistida no navegador + Env Fallback) ======================
+  const [key1, setKey1] = useState<string>(
+    () =>
+      localStorage.getItem('GEMINI_API_KEY_1') ||
+      (typeof __ENV_GEMINI_KEY_1__ !== 'undefined' ? __ENV_GEMINI_KEY_1__ : '') ||
+      ''
+  );
+  const [key2, setKey2] = useState<string>(
+    () =>
+      localStorage.getItem('GEMINI_API_KEY_2') ||
+      (typeof __ENV_GEMINI_KEY_2__ !== 'undefined' ? __ENV_GEMINI_KEY_2__ : '') ||
+      ''
+  );
   const [geminiModel, setGeminiModel] = useState<string>(
     () => localStorage.getItem('GEMINI_MODEL') || 'auto'
   );
@@ -104,7 +121,7 @@ export default function App() {
     () => Number(localStorage.getItem('REAPROVEITAR') ?? 0.0)
   );
   const [pausaConfig, setPausaConfig] = useState<number>(
-    () => Number(localStorage.getItem('PAUSA_ENTRE_CHAMADAS') ?? 1.5)
+    () => Number(localStorage.getItem('PAUSA_ENTRE_CHAMADAS') ?? 0.6)
   );
 
   // UI Modals / Drawers
@@ -849,6 +866,9 @@ export default function App() {
     if (e) e.preventDefault();
     if (isGenerating || isReviewing) return;
 
+    // Desbloqueia imediatamente o AudioContext durante o clique/toque do usuário (essencial no Chrome Mobile)
+    void audioRef.current?.resume();
+
     setIsGenerating(true);
     abortGenRef.current = false;
     const [W, H] = resConfig === '540x960' ? [540, 960] : [720, 1280];
@@ -905,9 +925,9 @@ export default function App() {
       };
 
       const modelos: string[] = planData.modelos || [
-        'gemini-3.1-flash-lite',
-        'gemini-3-flash-preview',
         'gemini-2.5-flash',
+        'gemini-2.5-flash-lite',
+        'gemini-3-flash-preview',
       ];
       let currentMi: number = planData.mi || 0;
       const temChave: boolean = Boolean(planData.tem_chave);
@@ -917,7 +937,7 @@ export default function App() {
       setDrawerTab('files');
       gtRef.current = 0;
       t0Ref.current = performance.now();
-      await play();
+      void play();
 
       // Etapa 2: Agente 1 (Cena 1, 3, 5...) e Agente 2 (Cena 2, 4, 6...) criam e salvam cada arquivo .js
       if (temChave) {
@@ -937,7 +957,7 @@ export default function App() {
           }
 
           setGenProgressLabel(
-            `Agente ${agentNum} (Chave ${agentNum}) → ${fileName}...`
+            `Agente ${agentNum} (Chave ${agentNum}) → ${fileName} (${i + 1}/${total})...`
           );
 
           const prevScene = i > 0 ? currentReel.scenes[i - 1] : null;
@@ -993,44 +1013,20 @@ export default function App() {
             currentMi = sceneOut.mi;
           }
 
-          // Sintetiza também a Voz Neural (Gemini TTS) da cena usando a Chave alternada do Agente
           const spokenText =
             s.narration || (s.sub ? `${s.text}. ${s.sub}` : s.text);
-          let ttsOut = await safeApiPost<{
-            audioBase64: string | null;
-            mimeType: string | null;
-            fallbackSpeech?: boolean;
-          }>('/api/agent/tts', {
-            text: spokenText,
-            idx: i,
-            voiceName,
-            key1: key1.trim(),
-            key2: key2.trim(),
-          });
-
-          if (!ttsOut) {
-            ttsOut = await sintetizarVozCenaLocal({
-              text: spokenText,
-              idx: i,
-              voiceName,
-              key1: key1.trim(),
-              key2: key2.trim(),
-            });
-          }
 
           const updatedScene: SceneSpec = {
             ...s,
             narration: spokenText,
-            voiceAudioBase64: ttsOut?.audioBase64 || undefined,
-            voiceMimeType: ttsOut?.mimeType || undefined,
             agentId: agentNum,
             fileName,
             code: sceneOut.code || null,
-            origem: sceneOut.code ? 'gemini' : 'fallback',
+            origem: sceneOut.origem === 'gemini' ? 'gemini' : 'fallback',
             status: 'ready',
           };
 
-          if (sceneOut.code) novos += 1;
+          if (sceneOut.origem === 'gemini') novos += 1;
 
           currentReel = {
             ...currentReel,
@@ -1039,6 +1035,49 @@ export default function App() {
             ),
           };
           setData(currentReel);
+
+          // Sintetiza a Voz Neural (Gemini TTS) em background sem travar a fila de criação das cenas!
+          const sceneIdx = i;
+          void (async () => {
+            try {
+              let ttsOut = await safeApiPost<{
+                audioBase64: string | null;
+                mimeType: string | null;
+                fallbackSpeech?: boolean;
+              }>('/api/agent/tts', {
+                text: spokenText,
+                idx: sceneIdx,
+                voiceName,
+                key1: key1.trim(),
+                key2: key2.trim(),
+              });
+              if (!ttsOut) {
+                ttsOut = await sintetizarVozCenaLocal({
+                  text: spokenText,
+                  idx: sceneIdx,
+                  voiceName,
+                  key1: key1.trim(),
+                  key2: key2.trim(),
+                });
+              }
+              if (ttsOut?.audioBase64) {
+                setData((prev) => ({
+                  ...prev,
+                  scenes: prev.scenes.map((scItem, idx) =>
+                    idx === sceneIdx
+                      ? {
+                          ...scItem,
+                          voiceAudioBase64: ttsOut!.audioBase64 || undefined,
+                          voiceMimeType: ttsOut!.mimeType || undefined,
+                        }
+                      : scItem
+                  ),
+                }));
+              }
+            } catch {
+              // Web Speech API em português atua como fallback imediato
+            }
+          })();
 
           anterior = s.idea || s.text;
 
@@ -1056,7 +1095,7 @@ export default function App() {
       } else {
         await runVisualInspectionPass(currentReel, modelos, currentMi);
         appendLog(
-          `\nModo offline concluído (abra a ⚙️ Engrenagem para colar as Chaves 1 e 2 da Gemini).`
+          `\n⚠️ Modo offline concluído: clique no botão de ⚙️ Engrenagem no topo da tela para colar suas Chaves 1 e 2 da Gemini neste navegador!`
         );
       }
     } catch (err) {

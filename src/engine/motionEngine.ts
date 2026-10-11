@@ -339,6 +339,23 @@ export const MotionLib = {
     ctx.beginPath();
     ctx.arc(cx, cy, Math.max(0.5, r), startA, endA);
   },
+  circle: (ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(0.5, r), 0, Math.PI * 2);
+  },
+  line: (ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number) => {
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  },
+  rect: (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r = 0) => {
+    if (r > 0) MotionLib.rrect(ctx, x, y, w, h, r);
+    else {
+      ctx.beginPath();
+      ctx.rect(x, y, w, h);
+    }
+  },
   bg: (ctx: CanvasRenderingContext2D, W: number, H: number, P: ScenePaintContext, v = 0) => {
     const R = MotionLib.rng((P.seed || 1) + v * 31);
     const bgMode = Math.floor(R() * 4);
