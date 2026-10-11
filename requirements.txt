@@ -1,0 +1,4 @@
+# Python 3 Puro - Sem dependências externas necessárias (usa apenas stdlib)
+# Caso hospede como Web Service Python no Render:
+# Build Command: npm install --include=dev && npm run build
+# Start Command: python3 app.py

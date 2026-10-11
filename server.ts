@@ -185,7 +185,15 @@ function extrairChaves(key1?: string, key2?: string): string[] {
   return chaves;
 }
 
+const modelDiscoveryCache = new Map<string, { ts: number; models: string[] }>();
+
 async function descobrir_modelos(chave0: string): Promise<{ models: string[]; logs: string[] }> {
+  const cacheKey = chave0.slice(0, 12);
+  const cached = modelDiscoveryCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < 30 * 60 * 1000) {
+    return { models: cached.models, logs: [] };
+  }
+
   const nomes: string[] = [];
   const logs: string[] = [];
   let token = '';
@@ -241,6 +249,10 @@ async function descobrir_modelos(chave0: string): Promise<{ models: string[]; lo
     if (prevA !== prevB) return prevA - prevB;
     return a.localeCompare(b);
   });
+
+  if (unique.length > 0) {
+    modelDiscoveryCache.set(cacheKey, { ts: Date.now(), models: unique });
+  }
 
   return { models: unique, logs };
 }
@@ -507,7 +519,16 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
+  app.disable('x-powered-by');
   app.use(express.json({ limit: '2mb' }));
+
+  // Render Zero-Downtime Health Check & Keep-Alive Ping
+  app.get(['/healthz', '/api/ping'], (_req, res) => {
+    res.status(200).json({
+      status: 'ok',
+      uptime: Math.round(process.uptime()),
+    });
+  });
 
   // Endpoint 1: Descobrir modelos disponíveis na Chave 1 (exatamente como descobrir_modelos() no Python)
   app.post('/api/agent/models', async (req, res) => {
@@ -824,15 +845,26 @@ Agora escreva o corpo da função da cena.`;
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(__dirname, 'dist');
-    app.use(express.static(distPath));
+    app.use(
+      '/assets',
+      express.static(path.join(distPath, 'assets'), {
+        maxAge: '1y',
+        immutable: true,
+      })
+    );
+    app.use(express.static(distPath, { maxAge: '1h' }));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Motion Showreel Agent running on http://0.0.0.0:${PORT}`);
   });
+
+  // Otimização para o Proxy Envoy/Cloudflare do Render (evita erro 502 Bad Gateway em conexões keep-alive)
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
 }
 
 startServer();

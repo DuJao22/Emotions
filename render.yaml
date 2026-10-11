@@ -1,12 +1,17 @@
 services:
   - type: web
-    name: kinetix-showreel-studio
+    name: motion-showreel-agent
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
+    healthCheckPath: /healthz
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm run start
     envVars:
       - key: NODE_ENV
         value: production
-      - key: GEMINI_API_KEY
+      - key: GEMINI_API_KEY_1
         sync: false
+      - key: GEMINI_API_KEY_2
+        sync: false
+      - key: GEMINI_MODEL
+        value: auto

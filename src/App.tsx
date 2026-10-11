@@ -34,6 +34,11 @@ import {
   buildStandaloneHtml,
 } from './engine/motionEngine';
 import { ShowreelAudioSynth } from './engine/audioSynth';
+import {
+  descobrirModelosLocal,
+  gerarPlanoLocal,
+  pedirCenaLocal,
+} from './engine/agentRunner';
 
 interface CompiledScene extends SceneSpec {
   fn: SceneDrawFn;
@@ -136,20 +141,33 @@ export default function App() {
     setSettingsOpen(false);
   };
 
-  // Discover models from Gemini API using key1/key2 (exatamente como descobrir_modelos() no Python)
+  // Discover models from Gemini API using key1/key2 (compatível com Render e Vercel)
   const handleDiscoverModels = async () => {
     setDiscoveringModels(true);
     try {
-      const res = await fetch('/api/agent/models', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          key1: key1.trim(),
-          key2: key2.trim(),
-          modelPref: geminiModel,
-        }),
-      });
-      const out = await res.json();
+      let out: { modelos?: string[]; logs?: string[] } | null = null;
+      try {
+        const res = await fetch('/api/agent/models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            key1: key1.trim(),
+            key2: key2.trim(),
+            modelPref: geminiModel,
+          }),
+        });
+        const ct = res.headers.get('content-type') || '';
+        if (res.ok && ct.includes('application/json')) {
+          out = await res.json();
+        }
+      } catch {
+        out = null;
+      }
+
+      if (!out) {
+        out = await descobrirModelosLocal(key1.trim(), key2.trim(), geminiModel);
+      }
+
       if (Array.isArray(out.modelos)) {
         setDiscoveredModels(out.modelos);
       }
@@ -163,9 +181,13 @@ export default function App() {
     }
   };
 
-  // Initialize Audio Synth
+  // Initialize Audio Synth & Render Keep-Alive Heartbeat
   useEffect(() => {
     audioRef.current = new ShowreelAudioSynth();
+    const keepAliveTimer = window.setInterval(() => {
+      fetch('/api/ping').catch(() => {});
+    }, 4 * 60 * 1000);
+    return () => window.clearInterval(keepAliveTimer);
   }, []);
 
   // Fit Canvas to #stage maintaining exact W/H aspect ratio (como fitCanvas() do script Python)
@@ -560,11 +582,40 @@ export default function App() {
     setGenProgressLabel('1/2 · Criando roteiro e DNA...');
 
     try {
-      // Passo 1: pedir_roteiro (1 chamada na chave 1)
-      const planRes = await fetch('/api/agent/plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // Passo 1: pedir_roteiro (tenta servidor primeiro; na Vercel estática roda direto no cliente)
+      let planData: {
+        showreel: ShowreelData;
+        modelos?: string[];
+        mi?: number;
+        tem_chave?: boolean;
+        logs?: string[];
+      } | null = null;
+
+      try {
+        const planRes = await fetch('/api/agent/plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: userPrompt,
+            key1: key1.trim(),
+            key2: key2.trim(),
+            geminiModel: geminiModel.trim() || 'auto',
+            duration: durationConfig,
+            width: W,
+            height: H,
+            reaproveitar: reaproveitarConfig,
+          }),
+        });
+        const ct = planRes.headers.get('content-type') || '';
+        if (planRes.ok && ct.includes('application/json')) {
+          planData = await planRes.json();
+        }
+      } catch {
+        planData = null;
+      }
+
+      if (!planData) {
+        planData = await gerarPlanoLocal({
           prompt: userPrompt,
           key1: key1.trim(),
           key2: key2.trim(),
@@ -573,10 +624,9 @@ export default function App() {
           width: W,
           height: H,
           reaproveitar: reaproveitarConfig,
-        }),
-      });
+        });
+      }
 
-      const planData = await planRes.json();
       if (Array.isArray(planData.logs)) {
         appendLog(planData.logs);
       }
@@ -616,10 +666,41 @@ export default function App() {
             `Cena ${i + 1}/${total} [${s.role}] · Chave ${activeKeyNum}...`
           );
 
-          const sceneRes = await fetch('/api/agent/scene', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+          let sceneOut: {
+            code: string | null;
+            origem: string;
+            mi?: number;
+            logs?: string[];
+          } | null = null;
+
+          try {
+            const sceneRes = await fetch('/api/agent/scene', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                dna: currentReel.dna,
+                scene: s,
+                idx: i,
+                total,
+                anterior,
+                width: W,
+                height: H,
+                key1: key1.trim(),
+                key2: key2.trim(),
+                modelos,
+                mi: currentMi,
+              }),
+            });
+            const ct = sceneRes.headers.get('content-type') || '';
+            if (sceneRes.ok && ct.includes('application/json')) {
+              sceneOut = await sceneRes.json();
+            }
+          } catch {
+            sceneOut = null;
+          }
+
+          if (!sceneOut) {
+            sceneOut = await pedirCenaLocal({
               dna: currentReel.dna,
               scene: s,
               idx: i,
@@ -631,10 +712,8 @@ export default function App() {
               key2: key2.trim(),
               modelos,
               mi: currentMi,
-            }),
-          });
-
-          const sceneOut = await sceneRes.json();
+            });
+          }
           if (Array.isArray(sceneOut.logs)) {
             appendLog(sceneOut.logs);
           }
