@@ -129,7 +129,7 @@ export const MotionLib = {
     const b = MotionLib.lerp(hash(xi, yi + 1), hash(xi + 1, yi + 1), u);
     return MotionLib.lerp(a, b, v);
   },
-  lines: (s: string, max = 11): string[] => {
+  lines: (s: string, max = 11, maxLines = 4): string[] => {
     const w = String(s).split(/\s+/).filter(Boolean);
     const L: string[] = [];
     let cur = '';
@@ -142,7 +142,7 @@ export const MotionLib = {
       }
     });
     if (cur) L.push(cur);
-    return L.slice(0, 4).length ? L.slice(0, 4) : [''];
+    return L.slice(0, maxLines).length ? L.slice(0, maxLines) : [''];
   },
   fit: (
     ctx: CanvasRenderingContext2D,
@@ -666,10 +666,10 @@ export const MotionLib = {
     const words = s.toUpperCase().split(/\s+/).filter(Boolean);
     if (!words.length) return;
 
-    // Quebra inteligente em linhas de até 24 caracteres para que 100% do que é falado caiba na tela com clareza
-    const lines = MotionLib.lines(words.join(' '), 24);
+    // Quebra inteligente em linhas de até 28 caracteres (até 6 linhas) para que 100% do que é falado caiba na tela com clareza
+    const lines = MotionLib.lines(words.join(' '), 28, 6);
     const longest = lines.reduce((acc, l) => (l.length > acc.length ? l : acc), '');
-    const sz = MotionLib.fit(ctx, longest, W * 0.82, Math.min(W * 0.044, 32), 700);
+    const sz = MotionLib.fit(ctx, longest, W * 0.82, Math.min(W * 0.042, 30), 700);
     const lh = sz * 1.32;
     const totalH = lines.length * lh + sz * 0.9;
     const boxW = W * 0.88;
@@ -1499,9 +1499,9 @@ M.col=(h,a=1)=>{const c=M.rgb(h);return 'rgba('+c[0]+','+c[1]+','+c[2]+','+M.cla
 M.mixc=(h1,h2,t)=>{const a=M.rgb(h1),b=M.rgb(h2);t=M.clamp(t);return 'rgb('+Math.round(M.lerp(a[0],b[0],t))+','+Math.round(M.lerp(a[1],b[1],t))+','+Math.round(M.lerp(a[2],b[2],t))+')'};
 M.rng=seed=>{let a=(seed|0)||1;return()=>{a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}};
 M.noise=(x,y=0,seed=1)=>{const hash=(ix,iy)=>{let n=(ix*374761393+iy*668265263+(seed|0)*1442695041)|0;n=(n^(n>>>13))*1274126177;return((n^(n>>>16))>>>0)/4294967296};const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi,u=xf*xf*(3-2*xf),v=yf*yf*(3-2*yf);return M.lerp(M.lerp(hash(xi,yi),hash(xi+1,yi),u),M.lerp(hash(xi,yi+1),hash(xi+1,yi+1),u),v)};
-M.lines=(s,max=11)=>{const w=String(s).split(/\\s+/).filter(Boolean),L=[];let cur='';
+M.lines=(s,max=11,maxL=4)=>{const w=String(s).split(/\\s+/).filter(Boolean),L=[];let cur='';
   w.forEach(x=>{if(cur&&(cur+' '+x).length>max){L.push(cur);cur=x}else cur=(cur?cur+' ':'')+x});
-  if(cur)L.push(cur);return L.slice(0,4).length?L.slice(0,4):['']};
+  if(cur)L.push(cur);return L.slice(0,maxL).length?L.slice(0,maxL):['']};
 M.fit=(ctx,s,maxW,size,weight)=>{ctx.save();size=Math.round(size);
   while(size>12){ctx.font=(weight||800)+' '+size+'px system-ui,Roboto,Arial,sans-serif';if(ctx.measureText(s).width<=maxW)break;size-=4}
   ctx.restore();return size};
@@ -1542,8 +1542,8 @@ M.mainText=(ctx,W,H,P,ts,o={})=>{
     {align:o.align||'center',rot:o.rot,color:(i===L.length-1&&L.length>1)?P.pal.acc:P.pal.fg,alpha:o.alpha===undefined?1:o.alpha,glow:P.pal.acc}))};
 M.sub=(ctx,W,H,P,ts)=>{const s=String(P.sub||'').trim();if(!s)return;const a=M.ease.outCubic(M.p(ts,.12,.32));if(a<=0)return;
   const words=s.toUpperCase().split(/\\s+/).filter(Boolean);if(!words.length)return;
-  const lines=M.lines(words.join(' '),24),long=lines.reduce((acc,l)=>l.length>acc.length?l:acc,'');
-  const sz=M.fit(ctx,long,W*.82,Math.min(W*.044,32),700),lh=sz*1.32,totalH=lines.length*lh+sz*.9,boxW=W*.88,boxX=(W-boxW)/2,baseY=H*.84-totalH/2+(1-a)*18;
+  const lines=M.lines(words.join(' '),28,6),long=lines.reduce((acc,l)=>l.length>acc.length?l:acc,'');
+  const sz=M.fit(ctx,long,W*.82,Math.min(W*.042,30),700),lh=sz*1.32,totalH=lines.length*lh+sz*.9,boxW=W*.88,boxX=(W-boxW)/2,baseY=H*.84-totalH/2+(1-a)*18;
   ctx.save();ctx.globalAlpha=a;ctx.fillStyle=M.col(P.pal.bg1,.78);M.rrect(ctx,boxX,baseY,boxW,totalH,14);ctx.fill();
   ctx.strokeStyle=M.col(P.pal.acc,.45);ctx.lineWidth=1.5;ctx.stroke();
   const speakProg=M.clamp((ts-.1)/Math.max(.4,(P.dur||3)*.78)),activeIdx=Math.floor(speakProg*words.length);let wc=0;

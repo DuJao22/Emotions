@@ -468,6 +468,90 @@ export async function gerarPlanoLocal(params: {
 
   let rawPlan: Record<string, unknown> | null = null;
 
+  // Extrator inteligente para roteiros estruturados (Cena 1, Aoede, Visual:, Chamada Final, etc.)
+  const parseStructuredBlocks = (rawPrompt: string) => {
+    const cleaned = rawPrompt.replace(/\r/g, '').trim();
+    const rawBlocks = cleaned
+      .split(/(?=(?:^|\n)\s*(?:Cena|Bloco|Ato|Parte)\s*(?:\d+|Final|Única)\b)/i)
+      .map((b) => b.trim())
+      .filter(Boolean);
+
+    const blocksToParse =
+      rawBlocks.length >= 2
+        ? rawBlocks
+        : cleaned
+            .split(/\n{2,}|(?=(?:Aoede|Kore|Locução|Narração|Voz)\s*[:(])/i)
+            .map((b) => b.trim())
+            .filter(Boolean);
+
+    const extracted: Array<{
+      text: string;
+      sub: string;
+      narration: string;
+      idea: string;
+    }> = [];
+
+    for (const blk of blocksToParse) {
+      const noHeader = blk
+        .replace(/^(?:Cena|Bloco|Ato|Parte)\s*(?:\d+|Final|Única)?\s*(?:[—–\-:]\s*[^\n"]*)?\n?/i, '')
+        .trim();
+
+      const visualMatch = noHeader.match(/\b(?:Visual|Vídeo|Tela|Animação|Cena\s+Visual)\s*:\s*([\s\S]*)$/i);
+      const visualRaw = visualMatch ? visualMatch[1].trim() : '';
+      const beforeVisual = (visualMatch ? noHeader.slice(0, visualMatch.index) : noHeader)
+        .replace(/^(?:Aoede|Kore|Puck|Charon|Locução|Narração|Voz| Áudio)\s*(?:\([^)]*\))?\s*:\s*/i, '')
+        .replace(/[“”"]/g, '')
+        .trim();
+
+      const calloutMatch = visualRaw.match(
+        /\b(?:chamada\s+final|texto\s+na\s+tela|frase\s+final)\s*:\s*([\s\S]*)$/i
+      );
+      const calloutText = calloutMatch ? calloutMatch[1].replace(/[“”"]/g, '').trim() : '';
+      const pureVisual = (calloutMatch ? visualRaw.slice(0, calloutMatch.index) : visualRaw)
+        .replace(/[.,;\s]+$/, '')
+        .trim();
+
+      const splitSpokenToTextSub = (spoken: string, visualIdea: string) => {
+        const cleanSpoken = spoken.replace(/\s+/g, ' ').trim();
+        if (!cleanSpoken) return;
+        const w = cleanSpoken.split(' ').filter(Boolean);
+        let headCount = 4;
+        if (w.length <= 5) headCount = Math.max(2, Math.ceil(w.length / 2));
+        else if (w.slice(0, 5).join(' ').length <= 36) headCount = 5;
+        const txt = w.slice(0, headCount).join(' ').toUpperCase().slice(0, 52);
+        const rest = w.slice(headCount).join(' ').slice(0, 155);
+        const sub = rest || cleanSpoken.slice(0, 155);
+        extracted.push({
+          text: txt,
+          sub,
+          narration: rest ? `${txt}. ${sub}` : txt,
+          idea:
+            visualIdea ||
+            `Composição cinematográfica em movimento ilustrando "${cleanSpoken}" com elementos visuais de alta precisão`,
+        });
+      };
+
+      if (beforeVisual) {
+        splitSpokenToTextSub(
+          beforeVisual,
+          pureVisual
+            ? `${pureVisual}${calloutText ? ` | Destaque visual: ${calloutText}` : ''}`
+            : ''
+        );
+      }
+      if (calloutText && (!beforeVisual || blocksToParse.length <= 2)) {
+        splitSpokenToTextSub(
+          calloutText,
+          pureVisual || 'Interface premium ao fundo com tipografia monumental em destaque e chamada final'
+        );
+      }
+    }
+
+    return extracted;
+  };
+
+  const preParsedScenes = parseStructuredBlocks(prompt);
+
   if (tem_chave) {
     const evitar =
       runs
@@ -476,15 +560,26 @@ export async function gerarPlanoLocal(params: {
         .filter(Boolean)
         .join('; ') || 'nenhum';
 
+    const structuredHint =
+      preParsedScenes.length >= 2
+        ? `\nROTEIRO PRÉ-IDENTIFICADO NO TEXTO DO CLIENTE (${preParsedScenes.length} blocos):\n` +
+          preParsedScenes
+            .map(
+              (s, idx) =>
+                `- Bloco ${idx + 1}: Fala="${s.narration}" | Visual="${s.idea}"`
+            )
+            .join('\n')
+        : '';
+
     const p = `Você é um Diretor Criativo de Motion Design de classe mundial.
 Analise profundamente o PEDIDO DO CLIENTE abaixo e crie uma direção de arte 100% ORIGINAL, SEM USAR TEMPLATES PADRÃO, onde o universo visual, a paleta de cores, a narrativa, os layouts e as transições nasçam exclusivamente do que o cliente pediu.
 
-PEDIDO DO CLIENTE: "${prompt}"
+PEDIDO DO CLIENTE: "${prompt}"${structuredHint}
 Duração total: ${duration} segundos (formato vertical 9:16, ${width}x${height}).
 Evite repetir títulos recentes: ${evitar}.
 
 REGRAS DE DIREÇÃO CRIATIVA E CONEXÃO PROFUNDA:
-1. NADA DE ESTRUTURA GENÉRICA: Entenda o produto, tema, emoção ou história do cliente. Crie um "narrative_thread" (fio condutor) que conte uma história contínua da Cena 1 até a última cena.
+1. NADA DE ESTRUTURA GENÉRICA: Entenda o produto, tema, emoção ou história do cliente. Crie um "narrative_thread" (fio condutor) que conte uma história contínua da Cena 1 até a última cena. Se o cliente enviou cenas ou falas específicas e descrições de "Visual:", preserve fielmente as falas do cliente e coloque a descrição de "Visual:" no campo "idea" de cada cena!
 2. DIREÇÃO DE ARTE E PALETA SOB MEDIDA:
    - Defina "estilo" e "estilo_desc" exclusivos para este projeto.
    - Escolha uma paleta hexadecimal "pal" ({bg1, bg2, acc, acc2, fg, dim}) que represente psicologicamente o pedido do cliente (garanta alto contraste de "fg", "acc" e "acc2" sobre "bg1" e "bg2").
@@ -497,9 +592,10 @@ REGRAS DE DIREÇÃO CRIATIVA E CONEXÃO PROFUNDA:
 4. VOZ NARRADORA + ESCRITA 100% NA TELA (REGRA CRÍTICA):
    - O vídeo terá uma VOZ NARRANDO tudo o que passa na tela cena a cena!
    - OBSERVAÇÃO OBRIGATÓRIA: PRATICAMENTE TUDO QUE FOR FALADO NA VOZ TEM QUE APARECER DE ESCRITA NA TELA!
-   - Portanto, em cada cena:
-     * "text" é o impacto inicial falado pela voz (2 a 4 palavras em destaque);
-     * "sub" é a continuação exata da frase falada pelo narrador naquela cena (5 a 10 palavras);
+   - NUNCA coloque a palavra "Visual:" ou instruções de câmera dentro de "text", "sub" ou "narration"! As instruções visuais vão APENAS no campo "idea".
+   - Em cada cena:
+     * "text" é o impacto inicial falado pela voz (2 a 5 palavras em destaque);
+     * "sub" é a continuação exata da frase falada pelo narrador naquela cena (5 a 16 palavras);
      * "narration" é a soma falada de "text" + "sub" ("TEXT. SUB."). Não coloque palavras em "narration" que não estejam em "text" ou "sub"!
 
 Responda APENAS com JSON válido neste formato exato:
@@ -620,57 +716,88 @@ Responda APENAS com JSON válido neste formato exato:
       'estabilizacao_editorial',
     ];
 
-    // Se o cliente colou um roteiro detalhado ou várias frases, extrai as falas reais do texto dele!
-    const cleanPrompt = prompt.replace(/[“”"]/g, '').trim();
-    const rawChunks = cleanPrompt
-      .split(/(?:Cena\s*\d+\s*[:\-–]?|\n+|(?<=[.!?])\s+)/i)
-      .map((c) => c.replace(/^(Locução|Narração|Texto|Visual)\s*:\s*/i, '').trim())
-      .filter((c) => c.length > 6);
+    if (preParsedScenes.length >= 2) {
+      const scs = preParsedScenes.slice(0, 9).map((item, i, arr) => {
+        const role: SceneRole =
+          i === 0 ? 'hook' : i === arr.length - 1 ? 'closing' : i === arr.length - 2 ? 'climax' : 'body';
+        return {
+          role,
+          text: item.text,
+          sub: item.sub,
+          narration: item.narration,
+          idea: item.idea,
+          layout_mode: layouts[i % layouts.length],
+          camera_motion: cameras[i % cameras.length],
+          visual_bridge: `Transição contínua de ${cameras[i % cameras.length]} para a próxima cena`,
+          transition_out: transIds[i % transIds.length],
+          weight: role === 'hook' || role === 'closing' ? 2 : role === 'climax' ? 2.2 : 1.4,
+        };
+      });
+      rawPlan = { title: preParsedScenes[0].text.slice(0, 32), scenes: scs };
+    } else {
+      // Se o cliente colou um texto corrido, remove rótulos técnicos "Visual:" da fala e extrai as frases
+      const visualMatch = prompt.match(/\bVisual\s*:\s*([\s\S]*)$/i);
+      const globalVisualHint = visualMatch ? visualMatch[1].trim() : '';
+      const spokenSource = (visualMatch ? prompt.slice(0, visualMatch.index) : prompt)
+        .replace(/[“”"]/g, '')
+        .trim();
 
-    const words = cleanPrompt
-      .toUpperCase()
-      .replace(/[,.;:!?\-]/g, ' ')
-      .split(/\s+/)
-      .filter((w) => w.length > 2)
-      .slice(0, 14);
-    if (!words.length) words.push('UNIVERSO', 'CRIATIVO');
+      const calloutInVisual = globalVisualHint.match(
+        /\b(?:chamada\s+final|texto\s+na\s+tela)\s*:\s*([\s\S]*)$/i
+      );
+      const extraSpoken = calloutInVisual ? calloutInVisual[1].replace(/[“”"]/g, '').trim() : '';
+      const combinedSpoken = [spokenSource, extraSpoken].filter(Boolean).join('. ');
 
-    const scs: Array<Record<string, unknown>> = [];
-    const targetCount = Math.min(8, Math.max(6, rawChunks.length >= 4 ? rawChunks.length : 7));
+      const rawChunks = (combinedSpoken || prompt.replace(/[“”"]/g, ''))
+        .split(/(?:Cena\s*\d+\s*[:\-–]?|\n+|(?<=[.!?])\s+)/i)
+        .map((c) => c.replace(/^(Locução|Narração|Texto|Visual|Aoede|Kore)\s*:\s*/i, '').trim())
+        .filter((c) => c.length > 4);
 
-    for (let i = 0; i < targetCount; i++) {
-      const role: SceneRole =
-        i === 0 ? 'hook' : i === targetCount - 1 ? 'closing' : i === targetCount - 2 ? 'climax' : 'body';
-      const chunk = rawChunks[i % Math.max(1, rawChunks.length)] || '';
-      const chunkWords = chunk.split(/\s+/).filter(Boolean);
+      const words = (combinedSpoken || prompt)
+        .toUpperCase()
+        .replace(/[,.;:!?\-“”"]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length > 2 && w !== 'VISUAL')
+        .slice(0, 14);
+      if (!words.length) words.push('MINI', 'SAAS', 'ELITE');
 
-      let txt = '';
-      let sub = '';
-      if (chunkWords.length >= 4) {
-        txt = chunkWords.slice(0, 3).join(' ').toUpperCase().slice(0, 42);
-        sub = chunkWords.slice(3, 16).join(' ').slice(0, 105);
-      } else {
-        const w1 = words[i % words.length];
-        const w2 = words[(i + 1) % words.length] || '';
-        txt = `${w1} ${w2}`.trim().slice(0, 42);
-        sub = chunk || `Cena ${i + 1} em movimento conectado e sincronizado`;
+      const scs: Array<Record<string, unknown>> = [];
+      const targetCount = Math.min(8, Math.max(5, rawChunks.length >= 4 ? rawChunks.length : 6));
+
+      for (let i = 0; i < targetCount; i++) {
+        const role: SceneRole =
+          i === 0 ? 'hook' : i === targetCount - 1 ? 'closing' : i === targetCount - 2 ? 'climax' : 'body';
+        const chunk = rawChunks[i % Math.max(1, rawChunks.length)] || '';
+        const chunkWords = chunk.split(/\s+/).filter(Boolean);
+
+        let txt = '';
+        let sub = '';
+        if (chunkWords.length >= 4) {
+          txt = chunkWords.slice(0, 4).join(' ').toUpperCase().slice(0, 50);
+          sub = chunkWords.slice(4, 22).join(' ').slice(0, 150);
+        } else {
+          txt = chunk.toUpperCase().slice(0, 50) || `${words[i % words.length]}`;
+          sub = rawChunks[(i + 1) % Math.max(1, rawChunks.length)] || 'Desenvolvimento com inteligência artificial';
+        }
+
+        scs.push({
+          role,
+          text: txt,
+          sub,
+          narration: sub ? `${txt}. ${sub}.` : `${txt}.`,
+          idea:
+            globalVisualHint ||
+            `Cena ${i + 1} ilustrando "${txt} - ${sub}" com interface premium e layout ${layouts[i % layouts.length]}`,
+          layout_mode: layouts[i % layouts.length],
+          camera_motion: cameras[i % cameras.length],
+          visual_bridge: `Transição contínua de ${cameras[i % cameras.length]} para a próxima cena`,
+          transition_out: transIds[i % transIds.length],
+          weight: role === 'hook' || role === 'closing' ? 2 : role === 'climax' ? 2.2 : 1.4,
+        });
       }
 
-      scs.push({
-        role,
-        text: txt,
-        sub,
-        narration: `${txt}. ${sub}.`,
-        idea: `Cena ${i + 1} ilustrando "${txt} - ${sub}" com layout ${layouts[i % layouts.length]}`,
-        layout_mode: layouts[i % layouts.length],
-        camera_motion: cameras[i % cameras.length],
-        visual_bridge: `Transição contínua de ${cameras[i % cameras.length]} para a próxima cena`,
-        transition_out: transIds[i % transIds.length],
-        weight: role === 'hook' || role === 'closing' ? 2 : role === 'climax' ? 2.2 : 1.4,
-      });
+      rawPlan = { title: words.slice(0, 4).join(' '), scenes: scs };
     }
-
-    rawPlan = { title: words.slice(0, 3).join(' '), scenes: scs };
   }
 
   logs.push(
@@ -684,9 +811,17 @@ Responda APENAS com JSON válido neste formato exato:
   const rawScenes = rawList.slice(0, 10).map((s: Record<string, unknown>, idx: number) => {
     const r = String(s.role || 'body') as SceneRole;
     const trOutRaw = String(s.transition_out || '') as TransitionKind;
-    const text = String(s.text || 'MOTION').trim().slice(0, 46);
-    let sub = String(s.sub || '').trim().slice(0, 110);
-    let narration = String(s.narration || '').trim().slice(0, 180);
+    // Remove qualquer vazamento de "Visual: ..." de dentro de text, sub ou narration
+    const stripVisualMeta = (str: string) =>
+      str
+        .replace(/\b(?:Visual|Vídeo|Cena\s+Visual)\s*:\s*[\s\S]*$/i, '')
+        .replace(/^(?:Aoede|Kore|Locução|Narração|Voz)\s*(?:\([^)]*\))?\s*:\s*/i, '')
+        .replace(/[“”"]/g, '')
+        .trim();
+
+    const text = (stripVisualMeta(String(s.text || 'MOTION')) || 'MOTION').slice(0, 52);
+    let sub = stripVisualMeta(String(s.sub || '')).slice(0, 155);
+    let narration = stripVisualMeta(String(s.narration || '')).slice(0, 220);
     if (narration) {
       const normText = text.toLowerCase().replace(/[^a-z0-9à-ú\s]/gi, '').trim();
       const normNarr = narration.toLowerCase().replace(/[^a-z0-9à-ú\s]/gi, '').trim();
@@ -696,10 +831,10 @@ Responda APENAS com JSON válido neste formato exato:
           .replace(/^[\s.,:;!?\-—]+/, '')
           .trim();
         if (remainder && remainder.length > sub.length) {
-          sub = remainder.slice(0, 110);
+          sub = remainder.slice(0, 155);
         }
       } else if (!sub) {
-        sub = narration.slice(0, 110);
+        sub = narration.slice(0, 155);
       }
     }
     if (!sub) sub = 'Experiência visual em movimento contínuo';
@@ -710,7 +845,7 @@ Responda APENAS com JSON válido neste formato exato:
       text,
       sub,
       narration,
-      idea: String(s.idea || '').slice(0, 420),
+      idea: String(s.idea || '').slice(0, 460),
       layout_mode: String(s.layout_mode || `layout_exclusivo_${idx + 1}`).slice(0, 80),
       camera_motion: String(s.camera_motion || 'movimento_continuo').slice(0, 80),
       visual_bridge: String(s.visual_bridge || 'continuidade para a próxima cena').slice(0, 200),

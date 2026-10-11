@@ -61,36 +61,6 @@ const TR = 0.32;
 declare const __ENV_GEMINI_KEY_1__: string | undefined;
 declare const __ENV_GEMINI_KEY_2__: string | undefined;
 
-async function safeApiPost<T>(url: string, payload: Record<string, unknown>): Promise<T | null> {
-  // Se o usuário já tem Chave 1 ou Chave 2 no navegador, ou se está no domínio estático do Vercel,
-  // roda 100% direto pelo agentRunner no navegador (zero latência de proxy, sem timeout de 10s e sem erro 500).
-  if (
-    payload.key1 ||
-    payload.key2 ||
-    (typeof window !== 'undefined' && window.location.hostname.endsWith('.vercel.app'))
-  ) {
-    return null;
-  }
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15000);
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    const raw = await res.text();
-    const trimmed = raw.trim();
-    if (!trimmed.startsWith('{')) return null;
-    return JSON.parse(trimmed) as T;
-  } catch {
-    return null;
-  }
-}
-
 export default function App() {
   // ====================== CONFIGURAÇÃO (Persistida no navegador + Env Fallback) ======================
   const [key1, setKey1] = useState<string>(
@@ -136,7 +106,9 @@ export default function App() {
   const [draftSceneCode, setDraftSceneCode] = useState<string>('');
 
   // Prompt & Showreel State
-  const [promptText, setPromptText] = useState<string>('');
+  const [promptText, setPromptText] = useState<string>(
+    () => localStorage.getItem('LAST_PROMPT') || INITIAL_SHOWREEL.prompt || ''
+  );
   const [data, setData] = useState<ShowreelData>(INITIAL_SHOWREEL);
   const [logs, setLogs] = useState<string[]>(() => {
     const d = INITIAL_SHOWREEL;
@@ -206,20 +178,11 @@ export default function App() {
     setSettingsOpen(false);
   };
 
-  // Discover models from Gemini API using key1/key2 (compatível com Render e Vercel)
+  // Discover models directly from Gemini REST API in browser (compatível 100% com Vercel, Render e Mobile)
   const handleDiscoverModels = async () => {
     setDiscoveringModels(true);
     try {
-      let out = await safeApiPost<{ modelos?: string[]; logs?: string[] }>('/api/agent/models', {
-        key1: key1.trim(),
-        key2: key2.trim(),
-        modelPref: geminiModel,
-      });
-
-      if (!out) {
-        out = await descobrirModelosLocal(key1.trim(), key2.trim(), geminiModel);
-      }
-
+      const out = await descobrirModelosLocal(key1.trim(), key2.trim(), geminiModel);
       if (Array.isArray(out.modelos)) {
         setDiscoveredModels(out.modelos);
       }
@@ -758,12 +721,7 @@ export default function App() {
 
       // 2. Se houver chave configurada, o Agente Diretor analisa o snapshot real (ou reconstrói a cena se tiver falha/animação faltante)
       if (temChave) {
-        let revOut = await safeApiPost<{
-          approved: boolean;
-          repairedCode: string | null;
-          reviewNote: string;
-          logs?: string[];
-        }>('/api/agent/review-scene', {
+        const revOut = await revisarCenaLocal({
           prompt: workingReel.prompt || '',
           dna: workingReel.dna,
           scene: s,
@@ -779,25 +737,6 @@ export default function App() {
           modelos,
           mi: currentMi,
         });
-
-        if (!revOut) {
-          revOut = await revisarCenaLocal({
-            prompt: workingReel.prompt || '',
-            dna: workingReel.dna,
-            scene: s,
-            idx: i,
-            total,
-            width: workingReel.W,
-            height: workingReel.H,
-            snapshotDataUrl: frameCheck.snapshots[1] || frameCheck.snapshots[0],
-            diagnosticReason: frameCheck.diagnosticReason,
-            needsRepair,
-            key1: key1.trim(),
-            key2: key2.trim(),
-            modelos,
-            mi: currentMi,
-          });
-        }
 
         if (revOut.logs && revOut.logs.length > 0) {
           appendLog(revOut.logs);
@@ -880,14 +819,8 @@ export default function App() {
     setGenProgressLabel('Roteirizando showreel...');
 
     try {
-      // Etapa 1: Criar Roteiro
-      let planData = await safeApiPost<{
-        showreel: ShowreelData;
-        modelos?: string[];
-        mi?: number;
-        tem_chave?: boolean;
-        logs?: string[];
-      }>('/api/agent/plan', {
+      // Etapa 1: Criar Roteiro 100% Direto no Navegador (sem depender de serverless/proxy)
+      const planData = await gerarPlanoLocal({
         prompt: userPrompt,
         key1: key1.trim(),
         key2: key2.trim(),
@@ -897,19 +830,6 @@ export default function App() {
         height: H,
         reaproveitar: reaproveitarConfig,
       });
-
-      if (!planData) {
-        planData = await gerarPlanoLocal({
-          prompt: userPrompt,
-          key1: key1.trim(),
-          key2: key2.trim(),
-          geminiModel: geminiModel.trim() || 'auto',
-          duration: durationConfig,
-          width: W,
-          height: H,
-          reaproveitar: reaproveitarConfig,
-        });
-      }
 
       if (Array.isArray(planData.logs)) {
         appendLog(planData.logs);
@@ -965,12 +885,7 @@ export default function App() {
           const ponteAnterior = prevScene?.visual_bridge || '';
           const proximaIdeia = nextScene ? `${nextScene.text} (${nextScene.idea})` : '';
 
-          let sceneOut = await safeApiPost<{
-            code: string | null;
-            origem: string;
-            mi?: number;
-            logs?: string[];
-          }>('/api/agent/scene', {
+          const sceneOut = await pedirCenaLocal({
             prompt: userPrompt,
             dna: currentReel.dna,
             scene: s,
@@ -986,25 +901,6 @@ export default function App() {
             modelos,
             mi: currentMi,
           });
-
-          if (!sceneOut) {
-            sceneOut = await pedirCenaLocal({
-              prompt: userPrompt,
-              dna: currentReel.dna,
-              scene: s,
-              idx: i,
-              total,
-              anterior,
-              ponteAnterior,
-              proximaIdeia,
-              width: W,
-              height: H,
-              key1: key1.trim(),
-              key2: key2.trim(),
-              modelos,
-              mi: currentMi,
-            });
-          }
 
           if (Array.isArray(sceneOut.logs)) {
             appendLog(sceneOut.logs);
@@ -1040,26 +936,13 @@ export default function App() {
           const sceneIdx = i;
           void (async () => {
             try {
-              let ttsOut = await safeApiPost<{
-                audioBase64: string | null;
-                mimeType: string | null;
-                fallbackSpeech?: boolean;
-              }>('/api/agent/tts', {
+              const ttsOut = await sintetizarVozCenaLocal({
                 text: spokenText,
                 idx: sceneIdx,
                 voiceName,
                 key1: key1.trim(),
                 key2: key2.trim(),
               });
-              if (!ttsOut) {
-                ttsOut = await sintetizarVozCenaLocal({
-                  text: spokenText,
-                  idx: sceneIdx,
-                  voiceName,
-                  key1: key1.trim(),
-                  key2: key2.trim(),
-                });
-              }
               if (ttsOut?.audioBase64) {
                 setData((prev) => ({
                   ...prev,
@@ -1120,6 +1003,9 @@ export default function App() {
           <b className="text-sm sm:text-base font-bold text-white truncate">
             {data.title}
           </b>
+          <span className="px-1.5 py-0.5 rounded bg-[#00f5a0]/15 border border-[#00f5a0]/40 text-[#00f5a0] font-mono text-[10px] font-semibold shrink-0">
+            v3.0 Direto
+          </span>
           <span className="opacity-75 font-mono text-[11px] sm:text-xs tabular-nums truncate">
             {recording ? '● GRAVANDO  ' : ''}
             {gtState.toFixed(1)}s / {data.duration}s · cena {currentSceneIdx + 1}/
@@ -1153,8 +1039,11 @@ export default function App() {
         <input
           type="text"
           value={promptText}
-          onChange={(e) => setPromptText(e.target.value)}
-          placeholder="Descreva o showreel (Agente 1 e Agente 2 criarão e revisarão cada cena)..."
+          onChange={(e) => {
+            setPromptText(e.target.value);
+            localStorage.setItem('LAST_PROMPT', e.target.value);
+          }}
+          placeholder="Descreva o showreel ou cole seu roteiro (Agente 1 e Agente 2 criarão cada cena)..."
           className="flex-1 h-11 px-3.5 rounded-xl bg-[#12121c] border border-[#2c2c40] focus:border-[#e11d48] focus:outline-none text-xs sm:text-sm text-white placeholder:text-white/40"
         />
         <button

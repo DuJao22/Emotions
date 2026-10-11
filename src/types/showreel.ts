@@ -128,307 +128,321 @@ export const STYLES: { name: string; desc: string }[] = [
 ];
 
 export const INITIAL_SHOWREEL: ShowreelData = {
-  title: 'SOLARIS — Energia Viva',
-  prompt: 'Lançamento de marca de bioenergia solar urbana: da luz bruta do sol à cidade inteligente em movimento contínuo',
+  title: 'FORMAÇÃO MINI SAAS ELITE',
+  prompt:
+    'Cena 1: "Você tem uma ideia de aplicativo mas acha que precisa de uma equipe inteira de programadores para tirar ela do papel?" Visual: Tela escura se iluminando com linhas de código brilhantes e um núcleo de IA pulsando.\nCena 2: "A verdade é que o jogo mudou. Hoje você consegue criar, lançar e escalar seu próprio Mini SaaS usando Inteligência Artificial." Visual: Interface SaaS moderna se montando sozinha em segundos e gráficos de crescimento subindo.\nCena 3: "Na Formação Mini SaaS Elite, você domina do zero a arquitetura, os agentes de IA e a criação de micro-aplicativos lucrativos." Visual: Ecossistema 3D conectado com módulos de produto, banco de dados e automação.\nCena 4: "Do primeiro prompt ao deploy em produção, transformando conhecimento em software real de alto valor." Visual: Fluxo de engenharia visual, servidores em nuvem e métricas de performance em tempo real.\nCena 5: "Conheça a Formação Mini SaaS Elite e dê o próximo passo na sua jornada de desenvolvimento com inteligência artificial." Visual: Nome do curso em destaque, interface premium ao fundo.\nCena Final: "FORMAÇÃO MINI SAAS ELITE. Sua ideia. Seu código. Seu próximo projeto. Acesse o link e conheça a formação." Visual: Nome do curso em destaque, interface premium ao fundo e chamada final.',
   W: 720,
   H: 1280,
-  duration: 24,
+  duration: 28,
   dna: {
     structure: 'crescendo',
     transition: 'zoom',
-    estilo: 'Cinema Sensorial & Geometria Solar',
-    estilo_desc: 'Raios atmosféricos dourados, ondas de energia fluida, arquitetura urbana iluminada e tipografia viva onde tudo que é narrado aparece escrito na tela',
-    client_intent: 'Apresentar a jornada da luz solar se transformando em energia limpa que pulsa pelas veias de uma metrópole moderna',
-    narrative_thread: 'O feixe de luz nasce no horizonte (Cena 1), atravessa cristais fotônicos (Cena 2), flui em correntes líquidas (Cena 3), alimenta a arquitetura da cidade (Cena 4), sincroniza a rede inteligente (Cena 5), explode em potência limpa (Cena 6) e consolida a assinatura SOLARIS (Cena 7).',
-    visual_motifs: ['feixes de luz solar', 'ondas de energia líquida', 'prismas fotônicos 3D', 'torres urbanas iluminadas'],
+    estilo: 'Arquitetura SaaS Elite & Engenharia IA',
+    estilo_desc:
+      'Interfaces premium em camadas de vidro escuro, feixes neurais ciano e esmeralda, telemetria viva de software e tipografia monumental sincronizada com a locução Aoede',
+    client_intent:
+      'Apresentar a Formação Mini SaaS Elite mostrando como transformar uma ideia em código e lançar um projeto SaaS real com Inteligência Artificial',
+    narrative_thread:
+      'Da faísca da ideia e código iluminado (Cena 1), à montagem autônoma da interface SaaS (Cena 2), arquitetura 3D do ecossistema (Cena 3), deploy em nuvem (Cena 4), convite oficial da formação (Cena 5) e chamada final de impacto (Cena 6).',
+    visual_motifs: [
+      'interface SaaS premium em camadas',
+      'linhas de código brilhantes',
+      'núcleo de inteligência artificial',
+      'gráficos e métricas em ascensão',
+    ],
     voice_name: 'Kore',
     pal: {
-      bg1: '#090604',
-      bg2: '#1f1209',
-      acc: '#ff6b00',
-      acc2: '#ffd166',
-      fg: '#fff8f0',
-      dim: '#c9a98d',
+      bg1: '#05070f',
+      bg2: '#0d1528',
+      acc: '#00f5a0',
+      acc2: '#00d9f5',
+      fg: '#f8fafc',
+      dim: '#94a3b8',
     },
-    bpm: 122,
+    bpm: 124,
     energy: 4,
-    hue: 0.08,
+    hue: 0.46,
   },
   scenes: [
     {
       role: 'hook',
-      text: 'TUDO COMEÇA NA LUZ',
-      sub: 'a fonte inesgotável do novo mundo',
-      narration: 'Tudo começa na luz: a fonte inesgotável do novo mundo.',
-      idea: 'Um eclipse dourado se abre no topo da tela lançando feixes diagonais volumétricos enquanto cada palavra narrada emerge escrita pelo horizonte solar',
-      layout_mode: 'horizonte_solar_topo_assimetrico',
+      text: 'VOCÊ TEM UMA IDEIA',
+      sub: 'de aplicativo mas acha que precisa de uma equipe inteira de programadores para tirar ela do papel?',
+      narration:
+        'VOCÊ TEM UMA IDEIA. de aplicativo mas acha que precisa de uma equipe inteira de programadores para tirar ela do papel?',
+      idea: 'Tela escura se iluminando com linhas de código brilhantes e um núcleo de inteligência artificial pulsando em perspectiva',
+      layout_mode: 'topo_assimetrico_terminal_ia',
       camera_motion: 'ascensao_vertical_lenta',
-      visual_bridge: 'Os feixes solares descem na diagonal para atingir o prisma 3D da Cena 2',
+      visual_bridge: 'As linhas de código convergem para construir a interface SaaS da Cena 2',
       transition_out: 'zoom',
-      dur: 3.4,
+      dur: 4.6,
       seed: 104921,
       fb: 'kinetic',
       origem: 'gemini',
       status: 'ready',
       agentId: 1,
       fileName: 'cena_01_hook.js',
-      compileMs: 5,
+      compileMs: 4,
       code: `const R=M.rng(P.seed),e=M.ease.outExpo(M.p(ts,0,.85));
-const sunY=H*(.32-.06*e),sunR=W*(.18+.08*e)*(1+P.pulse*.06);
-const g=ctx.createRadialGradient(W*.5,sunY,sunR*.1,W*.5,sunY,W*.95);
-g.addColorStop(0,M.col(P.pal.acc2,.95));g.addColorStop(.35,M.col(P.pal.acc,.45));g.addColorStop(1,'rgba(0,0,0,0)');
+const cx=W*.5,cy=H*.38;
+const g=ctx.createRadialGradient(cx,cy,10,cx,cy,W*.75);
+g.addColorStop(0,M.col(P.pal.acc2,.35*e));g.addColorStop(.5,M.col(P.pal.acc,.12*e));g.addColorStop(1,'rgba(0,0,0,0)');
 ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
-for(let k=0;k<18;k++){
-  const ang=M.lerp(-Math.PI*.15,Math.PI*1.15,k/17)+Math.sin(ts+k)*.03;
-  ctx.strokeStyle=M.col(k%2?P.pal.acc2:P.pal.acc,.12+.18*Math.sin(ts*2+k));
-  ctx.lineWidth=2+(k%3)*4;ctx.beginPath();
-  ctx.moveTo(W*.5,sunY);ctx.lineTo(W*.5+Math.cos(ang)*H,sunY+Math.sin(ang)*H);ctx.stroke();
+// Janela de código iluminada em perspectiva
+const winW=W*.84*e,winH=H*.34*e,wx=(W-winW)/2,wy=H*.21;
+ctx.fillStyle=M.col(P.pal.bg2,.88);M.rrect(ctx,wx,wy,winW,winH,18);ctx.fill();
+ctx.strokeStyle=M.col(P.pal.acc2,.65);ctx.lineWidth=2.5;ctx.stroke();
+for(let d=0;d<3;d++){
+  ctx.fillStyle=d===0?'#ff5f56':d===1?'#ffbd2e':P.pal.acc;
+  ctx.beginPath();ctx.arc(wx+26+d*20,wy+24,6,0,7);ctx.fill();
 }
-ctx.fillStyle=P.pal.acc2;ctx.beginPath();ctx.arc(W*.5,sunY,sunR,0,Math.PI*2);ctx.fill();
-ctx.fillStyle=P.pal.bg1;ctx.fillRect(0,H*.56,W,H*.44);
-for(let i=0;i<9;i++){
-  const y=H*.58+i*i*6.5,w=W*(.92-i*.06)*M.ease.outCubic(M.p(ts,.1+i*.04,.5));
-  ctx.fillStyle=M.col(i%2?P.pal.acc:P.pal.acc2,.75-i*.07);
-  ctx.fillRect((W-w)/2,y,w,Math.max(2,8-i*.7));
+for(let l=0;l<9;l++){
+  const lp=M.ease.outCubic(M.stagger(ts,l,.08,.05,.45));
+  const lw=(W*(.18+R()*.48))*lp;
+  const indent=(l%3)*24;
+  ctx.fillStyle=M.col(l%2?P.pal.acc:P.pal.acc2,.35+.45*lp);
+  M.rrect(ctx,wx+28+indent,wy+56+l*34,lw,12,6);ctx.fill();
 }
-const L=M.lines(P.text,12),fs=M.fit(ctx,'TUDO COMEÇA',W*.84,W*.15);
+// Núcleo neural pulsando sobre o código
+const coreR=W*(.09+.02*P.pulse)*e;
+ctx.strokeStyle=P.pal.acc;ctx.lineWidth=3.5;
+ctx.beginPath();ctx.arc(cx,wy+winH*.55,coreR*1.45,ts*2,ts*2+4.5);ctx.stroke();
+ctx.fillStyle=M.col(P.pal.acc2,.9);ctx.beginPath();ctx.arc(cx,wy+winH*.55,coreR*.65,0,7);ctx.fill();
+const L=M.lines(P.text,12),fs=M.fit(ctx,'VOCÊ TEM UMA',W*.84,W*.13);
 L.forEach((line,i)=>{
-  const st=M.ease.outBack(M.stagger(ts,i,.06,.1,.45));
-  M.text(ctx,line,W*.08,H*.66+i*fs*1.12,fs,{align:'left',color:i===L.length-1?P.pal.acc2:P.pal.fg,alpha:st,glow:P.pal.acc});
+  const st=M.ease.outBack(M.stagger(ts,i,.05,.09,.45));
+  M.text(ctx,line,W*.5,H*.62+i*fs*1.12,fs,{color:i===L.length-1?P.pal.acc:P.pal.fg,alpha:st,glow:P.pal.acc2});
 });`,
     },
     {
       role: 'body',
-      text: 'CAPTURA FOTÔNICA',
-      sub: 'cristais solares de alta densidade',
-      narration: 'Captura fotônica através de cristais solares de alta densidade.',
-      idea: 'Os feixes solares entram pela diagonal esquerda, atravessam um cristal octaédrico 3D giratório e revelam as palavras faladas na tela',
-      layout_mode: 'prisma_diagonal_dividido',
-      camera_motion: 'orbita_3d_aproximacao',
-      visual_bridge: 'O feixe refratado na direita se transforma nas correntes líquidas da Cena 3',
+      text: 'O JOGO MUDOU COM IA',
+      sub: 'hoje você consegue criar, lançar e escalar seu próprio Mini SaaS em tempo recorde',
+      narration:
+        'O JOGO MUDOU COM IA. hoje você consegue criar, lançar e escalar seu próprio Mini SaaS em tempo recorde.',
+      idea: 'Interface moderna de SaaS se montando sozinha em segundos com cards modulares e gráficos de crescimento subindo',
+      layout_mode: 'dashboard_modular_dinamico',
+      camera_motion: 'travelling_ascendente',
+      visual_bridge: 'Os cards da interface expandem em profundidade 3D para a Cena 3',
       transition_out: 'wipe_h',
-      dur: 3.3,
+      dur: 4.5,
       seed: 382910,
-      fb: 'cube',
+      fb: 'grid',
       origem: 'gemini',
       status: 'ready',
       agentId: 2,
       fileName: 'cena_02_body.js',
-      compileMs: 5,
-      code: `const e=M.ease.outCubic(M.p(ts,0,.7)),cx=W*.52,cy=H*.46,s=W*.25*e*(1+P.pulse*.08);
-ctx.strokeStyle=M.col(P.pal.acc2,.85);ctx.lineWidth=6;
-ctx.beginPath();ctx.moveTo(0,H*.18);ctx.lineTo(cx,cy);ctx.stroke();
-for(let k=0;k<7;k++){
-  const p=M.ease.outExpo(M.p(ts,.2+k*.04,.55));
-  const ty=cy+(k-3)*H*.075;
-  ctx.strokeStyle=M.col(k%2?P.pal.acc:P.pal.acc2,.75);ctx.lineWidth=3+P.pulse*3;
-  ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(M.lerp(cx,W,p),M.lerp(cy,ty,p));ctx.stroke();
-}
-const V=[[0,-s*1.3,0],[0,s*1.3,0],[-s,0,-s],[s,0,-s],[s,0,s],[-s,0,s]];
-const E=[[0,2],[0,3],[0,4],[0,5],[1,2],[1,3],[1,4],[1,5],[2,3],[3,4],[4,5],[5,2]];
-const Q=V.map(v=>M.proj(M.rot3(v,ts*.8,ts*1.4,ts*.3),W,H,800,cx,cy));
-ctx.lineWidth=3.5;
-E.forEach((ed,i)=>{
-  ctx.strokeStyle=M.col(i%2?P.pal.acc2:P.pal.acc,.92);
-  ctx.beginPath();ctx.moveTo(Q[ed[0]].x,Q[ed[0]].y);ctx.lineTo(Q[ed[1]].x,Q[ed[1]].y);ctx.stroke();
+      compileMs: 4,
+      code: `const e=M.ease.outExpo(M.p(ts,0,.75));
+// Cards modulares de UI SaaS se encaixando
+const cards=[
+  {x:W*.08,y:H*.26,w:W*.4,h:H*.16,c:P.pal.acc},
+  {x:W*.52,y:H*.26,w:W*.4,h:H*.16,c:P.pal.acc2},
+  {x:W*.08,y:H*.45,w:W*.84,h:H*.24,c:P.pal.acc}
+];
+cards.forEach((cd,i)=>{
+  const st=M.ease.outBack(M.stagger(ts,i,.05,.12,.5));
+  const dy=(1-st)*60;
+  ctx.save();ctx.globalAlpha=M.clamp(st);
+  ctx.fillStyle=M.col(P.pal.bg2,.9);
+  M.rrect(ctx,cd.x,cd.y+dy,cd.w,cd.h,16);ctx.fill();
+  ctx.strokeStyle=M.col(cd.c,.65);ctx.lineWidth=2.5;ctx.stroke();
+  ctx.fillStyle=M.col(cd.c,.25);M.rrect(ctx,cd.x+18,cd.y+dy+18,cd.w*.45,14,7);ctx.fill();
+  ctx.restore();
 });
-const words=P.text.split(' '),fs=M.fit(ctx,P.text,W*.85,W*.13);
-words.forEach((w,i)=>{
-  const st=M.ease.outExpo(M.stagger(ts,i,.05,.12,.45));
-  M.text(ctx,w,W*.92,H*.14+i*fs*1.15,fs,{align:'right',color:i===0?P.pal.fg:P.pal.acc2,alpha:st,glow:P.pal.acc});
+// Gráfico de crescimento subindo no card principal
+const gx=W*.13,gy=H*.64,gw=W*.74,gh=H*.14;
+ctx.beginPath();
+for(let k=0;k<=24;k++){
+  const p=k/24,px=gx+p*gw;
+  const prog=M.clamp((ts*1.2)-p*.5);
+  const py=gy-Math.pow(p,1.5)*gh*prog-Math.sin(p*8+ts*4)*8*prog;
+  if(k===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);
+}
+ctx.strokeStyle=P.pal.acc;ctx.lineWidth=5;ctx.stroke();
+const L=M.lines(P.text,14),fs=M.fit(ctx,'O JOGO MUDOU',W*.86,W*.125);
+L.forEach((l,i)=>{
+  const st=M.ease.outExpo(M.stagger(ts,i,.04,.09,.42));
+  M.text(ctx,l,W*.5,H*.13+i*fs*1.12,fs,{color:i===1?P.pal.acc:P.pal.fg,alpha:st,glow:P.pal.acc});
 });`,
     },
     {
       role: 'body',
-      text: 'CORRENTE VIVA',
-      sub: 'transmissão sem perdas em tempo real',
-      narration: 'Corrente viva: transmissão sem perdas em tempo real.',
-      idea: 'Fitas de energia líquida fluem em curvas senoidais pelo palco inteiro com o texto narrado escrito em destaque sobre o fluxo',
-      layout_mode: 'fluxo_liquido_horizontal_imersivo',
-      camera_motion: 'travelling_acompanhando_onda',
-      visual_bridge: 'As correntes sobem verticalmente na borda direita para erguer os edifícios da Cena 4',
+      text: 'ARQUITETURA & AGENTES',
+      sub: 'você domina do zero a criação de micro-aplicativos inteligentes e lucrativos',
+      narration:
+        'ARQUITETURA & AGENTES. você domina do zero a criação de micro-aplicativos inteligentes e lucrativos.',
+      idea: 'Ecossistema 3D orbital conectando agentes de IA, banco de dados, autenticação e pagamentos em tempo real',
+      layout_mode: 'orbita_3d_ecossistema',
+      camera_motion: 'orbita_perspectiva_3d',
+      visual_bridge: 'O cubo central dispara feixes de deploy para a nuvem da Cena 4',
       transition_out: 'wipe_v',
-      dur: 3.4,
+      dur: 4.5,
       seed: 591823,
-      fb: 'orbit',
+      fb: 'cube',
       origem: 'gemini',
       status: 'ready',
       agentId: 1,
       fileName: 'cena_03_body.js',
       compileMs: 5,
-      code: `const R=M.rng(P.seed),e=M.ease.outCubic(M.p(ts,0,.7));
-for(let band=0;band<8;band++){
-  const yBase=H*(.2+band*.08);
-  ctx.beginPath();
-  for(let x=0;x<=W;x+=18){
-    const wave=Math.sin(x*.012-ts*3.8+band*.7)*H*.042*(1+P.pulse*.35)+Math.cos(x*.006+ts*2)*H*.02;
-    const py=yBase+wave*e;
-    if(x===0)ctx.moveTo(x,py);else ctx.lineTo(x,py);
-  }
-  ctx.strokeStyle=M.col(band%2?P.pal.acc:P.pal.acc2,.35+.08*band);
-  ctx.lineWidth=3+band*1.2;ctx.stroke();
-  const px=((ts*260*(1+band*.15)+band*110)%W);
-  const py=yBase+Math.sin(px*.012-ts*3.8+band*.7)*H*.042*(1+P.pulse*.35)*e;
-  ctx.fillStyle=P.pal.fg;ctx.beginPath();ctx.arc(px,py,6+P.pulse*5,0,7);ctx.fill();
+      code: `const cx=W*.5,cy=H*.44,e=M.ease.outCubic(M.p(ts,0,.7));
+const s=W*.2*e*(1+P.pulse*.07);
+const V=[[-s,-s,-s],[s,-s,-s],[s,s,-s],[-s,s,-s],[-s,-s,s],[s,-s,s],[s,s,s],[-s,s,s]];
+const E=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+const Q=V.map(v=>M.proj(M.rot3(v,ts*.7,ts*1.1,ts*.4),W,H,800,cx,cy));
+ctx.lineWidth=3.2;
+E.forEach((ed,i)=>{
+  ctx.strokeStyle=M.col(i%2?P.pal.acc:P.pal.acc2,.9);
+  ctx.beginPath();ctx.moveTo(Q[ed[0]].x,Q[ed[0]].y);ctx.lineTo(Q[ed[1]].x,Q[ed[1]].y);ctx.stroke();
+});
+for(let k=0;k<6;k++){
+  const a=ts*1.3+k*Math.PI/3,r=W*.34*e;
+  const nx=cx+Math.cos(a)*r,ny=cy+Math.sin(a)*r*.58;
+  ctx.strokeStyle=M.col(P.pal.acc2,.4);ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(nx,ny);ctx.stroke();
+  ctx.fillStyle=P.pal.bg2;M.rrect(ctx,nx-42,ny-22,84,44,10);ctx.fill();
+  ctx.strokeStyle=k%2?P.pal.acc:P.pal.acc2;ctx.stroke();
+  ctx.fillStyle=k%2?P.pal.acc:P.pal.acc2;ctx.beginPath();ctx.arc(nx,ny,7+P.pulse*3,0,7);ctx.fill();
 }
-ctx.save();ctx.translate(W*.5,H*.46);ctx.rotate(-.07);
-const fs=M.fit(ctx,P.text,W*.86,W*.15);
-ctx.fillStyle=M.col(P.pal.bg1,.86);ctx.fillRect(-W*.46,-fs*.8,W*.92,fs*1.6);
-ctx.strokeStyle=P.pal.acc;ctx.lineWidth=3;ctx.strokeRect(-W*.46,-fs*.8,W*.92,fs*1.6);
-M.text(ctx,P.text,0,0,fs*(.85+.15*e),{color:P.pal.acc2,glow:P.pal.acc});
-ctx.restore();`,
+const L=M.lines(P.text,14),fs=M.fit(ctx,'ARQUITETURA',W*.86,W*.12);
+L.forEach((l,i)=>{
+  M.text(ctx,l,W*.5,H*.14+i*fs*1.12,fs*e,{color:i===0?P.pal.fg:P.pal.acc2,glow:P.pal.acc});
+});`,
     },
     {
       role: 'body',
-      text: 'METRÓPOLE ACESA',
-      sub: 'arquitetura alimentada pelo sol',
-      narration: 'Metrópole acesa, com arquitetura alimentada pelo sol.',
-      idea: 'Silhueta de arranha-céus emergindo de baixo para cima com janelas se acendendo e o texto falado gravado no céu urbano',
-      layout_mode: 'arquitetura_vertical_skyline',
-      camera_motion: 'tilt_up_monumental',
-      visual_bridge: 'O topo das torres emite pulsos concêntricos que formam a malha neural da Cena 5',
-      transition_out: 'crossfade',
-      dur: 3.3,
+      text: 'DO PROMPT AO DEPLOY',
+      sub: 'transformando ideias em software real rodando na nuvem com alta performance',
+      narration:
+        'DO PROMPT AO DEPLOY. transformando ideias em software real rodando na nuvem com alta performance.',
+      idea: 'Correntes de dados de alta velocidade e pipeline de deploy contínuo subindo pela tela com telemetria viva',
+      layout_mode: 'fluxo_pipeline_vertical',
+      camera_motion: 'tilt_up_veloz',
+      visual_bridge: 'O feixe de deploy ilumina a interface premium principal da Formação Mini SaaS Elite na Cena 5',
+      transition_out: 'flash',
+      dur: 4.4,
       seed: 774120,
-      fb: 'grid',
+      fb: 'tunnel',
       origem: 'gemini',
       status: 'ready',
       agentId: 2,
       fileName: 'cena_04_body.js',
       compileMs: 4,
-      code: `const R=M.rng(P.seed),nB=11,bw=W/nB;
-for(let b=0;b<nB;b++){
-  const st=M.ease.outExpo(M.stagger(ts,b,0,.04,.65));
-  const bh=H*(.28+R()*0.38)*st;
-  const x=b*bw+4,y=H*.78-bh,w=bw-8;
-  ctx.fillStyle=M.mixc(P.pal.bg1,P.pal.bg2,.6+(b%3)*.2);
-  ctx.fillRect(x,y,w,bh);
-  ctx.strokeStyle=M.col(P.pal.acc,.55);ctx.lineWidth=2;ctx.strokeRect(x,y,w,bh);
-  const rows=Math.floor(bh/28);
-  for(let r=0;r<rows;r++){
-    const lit=Math.sin(ts*5+b*1.7+r*.6)>-.1;
-    if(lit){
-      ctx.fillStyle=M.col((r+b)%2?P.pal.acc2:P.pal.acc,.75+P.pulse*.25);
-      ctx.fillRect(x+6,y+10+r*26,w-12,14);
-    }
+      code: `const e=M.ease.outExpo(M.p(ts,0,.7));
+for(let col=0;col<7;col++){
+  const x=W*(.12+col*.126);
+  ctx.strokeStyle=M.col(col%2?P.pal.acc:P.pal.acc2,.22);
+  ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,H*.18);ctx.lineTo(x,H*.72);ctx.stroke();
+  for(let p=0;p<3;p++){
+    const py=H*.72-(((ts*320*(1+col*.1)+p*220)%(H*.54)));
+    ctx.fillStyle=col%2?P.pal.acc:P.pal.acc2;
+    M.rrect(ctx,x-5,py,10,36,5);ctx.fill();
   }
 }
-const L=M.lines(P.text,10),fs=M.fit(ctx,L[0]||P.text,W*.84,W*.16);
+const cx=W*.5,cy=H*.45;
+for(let r=0;r<4;r++){
+  const rad=W*(.12+r*.09)*e*(1+P.pulse*.05);
+  ctx.strokeStyle=M.col(r%2?P.pal.acc2:P.pal.acc,.75-r*.12);
+  ctx.lineWidth=4;ctx.beginPath();ctx.arc(cx,cy,rad,ts*(r%2?2:-2),ts*(r%2?2:-2)+4.2);ctx.stroke();
+}
+const L=M.lines(P.text,14),fs=M.fit(ctx,'DO PROMPT AO',W*.86,W*.13);
 L.forEach((l,i)=>{
-  const p=M.ease.outBack(M.stagger(ts,i,.06,.1,.45));
-  M.text(ctx,l,W*.08,H*.15+i*fs*1.1,fs,{align:'left',color:i===0?P.pal.fg:P.pal.acc,alpha:p,glow:P.pal.acc});
+  M.text(ctx,l,cx,H*.14+i*fs*1.12,fs*e,{color:i===1?P.pal.acc:P.pal.fg,glow:P.pal.acc2});
 });`,
     },
     {
-      role: 'body',
-      text: 'REDE INTELIGENTE',
-      sub: 'equilíbrio autônomo em cada quarteirão',
-      narration: 'Rede inteligente: equilíbrio autônomo em cada quarteirão.',
-      idea: 'Constelação de nós urbanos interconectados em 3D trocando pacotes de luz com toda a fala escrita na tela',
-      layout_mode: 'constelacao_isometrica_hud',
-      camera_motion: 'rotacao_orbital_rede',
-      visual_bridge: 'Todos os nós convergem para o núcleo central preparando a explosão de potência da Cena 6',
-      transition_out: 'flash',
-      dur: 3.3,
-      seed: 849201,
-      fb: 'tunnel',
-      origem: 'gemini',
-      status: 'ready',
-      agentId: 1,
-      fileName: 'cena_05_body.js',
-      compileMs: 5,
-      code: `const R=M.rng(P.seed),cx=W*.5,cy=H*.48,e=M.ease.outExpo(M.p(ts,0,.7));
-const nodes=[];
-for(let i=0;i<24;i++){
-  const a=i*2.39996,r=W*.36*Math.sqrt((i+.5)/24)*e;
-  const p3=M.rot3([Math.cos(a)*r,Math.sin(a)*r,(R()-.5)*W*.35],ts*.55,ts*.75,0);
-  nodes.push(M.proj(p3,W,H,750,cx,cy));
-}
-ctx.lineWidth=1.8;
-for(let i=0;i<nodes.length;i++){
-  for(let j=i+1;j<nodes.length;j++){
-    const d=Math.hypot(nodes[i].x-nodes[j].x,nodes[i].y-nodes[j].y);
-    if(d<W*.28){
-      ctx.strokeStyle=M.col(P.pal.acc,(1-d/(W*.28))*.65);
-      ctx.beginPath();ctx.moveTo(nodes[i].x,nodes[i].y);ctx.lineTo(nodes[j].x,nodes[j].y);ctx.stroke();
-    }
-  }
-}
-nodes.forEach((n,i)=>{
-  ctx.fillStyle=i%2?P.pal.acc2:P.pal.acc;
-  ctx.beginPath();ctx.arc(n.x,n.y,(5+P.pulse*5)*n.s,0,7);ctx.fill();
-});
-const fs=M.fit(ctx,P.text,W*.86,W*.13);
-M.text(ctx,P.text,W*.5,H*.15,fs,{color:P.pal.fg,glow:P.pal.acc});`,
-    },
-    {
       role: 'climax',
-      text: '100% IMPACTO LIMPO',
-      sub: 'zero emissões e potência máxima',
-      narration: 'Cem por cento impacto limpo: zero emissões e potência máxima!',
-      idea: 'Supernova solar de anéis concêntricos e raios geométricos expandindo do núcleo com tipografia monumental sincronizada à voz',
-      layout_mode: 'explosao_monumental_centro',
+      text: 'CONHEÇA A FORMAÇÃO MINI SAAS ELITE',
+      sub: 'e dê o próximo passo na sua jornada de desenvolvimento com inteligência artificial',
+      narration:
+        'CONHEÇA A FORMAÇÃO MINI SAAS ELITE. e dê o próximo passo na sua jornada de desenvolvimento com inteligência artificial.',
+      idea: 'Nome do curso em destaque monumental com interface SaaS premium iluminada ao fundo e raios de energia convergente',
+      layout_mode: 'destaque_curso_interface_premium',
       camera_motion: 'zoom_choque_elastico',
-      visual_bridge: 'A supernova desacelera e se condensa no emblema circular perfeito da Cena 7',
+      visual_bridge: 'A interface premium se estabiliza no emblema oficial e chamada final da Cena 6',
       transition_out: 'zoom',
-      dur: 3.7,
+      dur: 5.0,
       seed: 918273,
       fb: 'burst',
       origem: 'gemini',
       status: 'ready',
-      agentId: 2,
-      fileName: 'cena_06_climax.js',
-      compileMs: 6,
-      code: `const R=M.rng(P.seed),cx=W/2,cy=H*.44,g=M.ease.outExpo(M.p(ts,0,.65));
-for(let ring=0;ring<6;ring++){
-  const rad=W*(.1+ring*.13)*g*(1+P.pulse*.1);
-  ctx.strokeStyle=M.col(ring%2?P.pal.acc2:P.pal.acc,.85-ring*.11);
-  ctx.lineWidth=8-ring;
-  ctx.beginPath();ctx.arc(cx,cy,rad,ts*(ring%2?2:-2),ts*(ring%2?2:-2)+Math.PI*1.65);ctx.stroke();
+      agentId: 1,
+      fileName: 'cena_05_climax.js',
+      compileMs: 5,
+      code: `const cx=W*.5,cy=H*.42,e=M.ease.outExpo(M.p(ts,0,.75));
+// Interface premium SaaS ao fundo em perspectiva
+const pw=W*.88*e,ph=H*.48*e,px=(W-pw)/2,py=H*.18;
+ctx.fillStyle=M.col(P.pal.bg2,.85);M.rrect(ctx,px,py,pw,ph,22);ctx.fill();
+ctx.strokeStyle=M.col(P.pal.acc2,.55);ctx.lineWidth=2.5;ctx.stroke();
+// Barra superior e painéis internos da interface premium
+ctx.fillStyle=M.col(P.pal.acc,.16);M.rrect(ctx,px+16,py+16,pw-32,38,10);ctx.fill();
+for(let k=0;k<3;k++){
+  const cw=(pw-56)/3,cx0=px+16+k*(cw+12);
+  ctx.fillStyle=M.col(P.pal.bg1,.75);M.rrect(ctx,cx0,py+70,cw,ph*.32,12);ctx.fill();
+  ctx.strokeStyle=M.col(k===1?P.pal.acc:P.pal.acc2,.45);ctx.lineWidth=1.5;ctx.stroke();
 }
-for(let k=0;k<36;k++){
-  const a=Math.PI*2*k/36+ts*.8;
-  const r0=W*.12,r1=W*(.2+.55*g*(.5+R()*.5));
-  ctx.strokeStyle=M.col(k%2?P.pal.acc:P.pal.acc2,.7);ctx.lineWidth=3;
-  ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*r0,cy+Math.sin(a)*r0);ctx.lineTo(cx+Math.cos(a)*r1,cy+Math.sin(a)*r1);ctx.stroke();
-}
-const L=M.lines(P.text,10),fs=M.fit(ctx,L[0]||P.text,W*.88,W*.18);
+// Halo energético e nome do curso em destaque absoluto
+const glow=ctx.createRadialGradient(cx,cy,10,cx,cy,W*.52*e);
+glow.addColorStop(0,M.col(P.pal.acc,.38));glow.addColorStop(1,'rgba(0,0,0,0)');
+ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
+const L=M.lines(P.text,14),fs=M.fit(ctx,'FORMAÇÃO MINI',W*.86,W*.125);
 L.forEach((l,i)=>{
-  const st=M.ease.outBack(M.stagger(ts,i,.04,.08,.45));
-  M.text(ctx,l,cx,cy+(i-(L.length-1)/2)*fs*1.12,fs*st*(1+P.pulse*.07),{color:i===0?P.pal.fg:P.pal.acc2,stroke:P.pal.bg1,strokeW:10,glow:P.pal.acc});
+  const st=M.ease.outBack(M.stagger(ts,i,.05,.09,.48));
+  M.text(ctx,l,cx,H*.36+(i-(L.length-1)/2)*fs*1.16,fs*st*(1+P.pulse*.05),{
+    color:i===L.length-1?P.pal.acc:P.pal.fg,
+    stroke:P.pal.bg1,
+    strokeW:8,
+    glow:P.pal.acc
+  });
 });`,
     },
     {
       role: 'closing',
-      text: 'SOLARIS',
-      sub: 'o futuro já está aceso',
-      narration: 'Solaris: o futuro já está aceso.',
-      idea: 'O sol estilizado da abertura retorna em equilíbrio minimalista com órbitas douradas suaves e assinatura final narrada e escrita',
-      layout_mode: 'assinatura_emblema_minimalista',
+      text: 'FORMAÇÃO MINI SAAS ELITE',
+      sub: 'Sua ideia. Seu código. Seu próximo projeto. Acesse o link e conheça a formação.',
+      narration:
+        'FORMAÇÃO MINI SAAS ELITE. Sua ideia. Seu código. Seu próximo projeto. Acesse o link e conheça a formação.',
+      idea: 'Nome do curso em destaque, interface premium ao fundo e chamada final: FORMAÇÃO MINI SAAS ELITE Sua ideia. Seu código. Seu próximo projeto. Acesse o link e conheça a formação.',
+      layout_mode: 'chamada_final_interface_premium',
       camera_motion: 'estabilizacao_cinematografica',
-      visual_bridge: 'Encerramento cíclico conectando com a luz da Cena 1',
+      visual_bridge: 'Encerramento com botão CTA pulsante e assinatura visual completa',
       transition_out: 'crossfade',
-      dur: 3.6,
+      dur: 5.0,
       seed: 441092,
       fb: 'closing',
       origem: 'gemini',
       status: 'ready',
-      agentId: 1,
-      fileName: 'cena_07_closing.js',
-      compileMs: 4,
-      code: `const cx=W/2,cy=H*.42,e=M.ease.outExpo(M.p(ts,0,.85));
-const grad=ctx.createRadialGradient(cx,cy,10,cx,cy,W*.45*e);
-grad.addColorStop(0,M.col(P.pal.acc2,.45));grad.addColorStop(1,'rgba(0,0,0,0)');
-ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
-ctx.strokeStyle=P.pal.acc2;ctx.lineWidth=4;
-ctx.beginPath();ctx.arc(cx,cy,W*.22*e*(1+P.pulse*.04),0,Math.PI*2);ctx.stroke();
-ctx.strokeStyle=M.col(P.pal.acc,.7);ctx.lineWidth=2;
-ctx.beginPath();ctx.arc(cx,cy,W*.3*e,ts*.6,ts*.6+Math.PI*1.35);ctx.stroke();
-ctx.fillStyle=P.pal.acc;ctx.beginPath();ctx.arc(cx,cy-W*.12*e,W*.045*e,0,Math.PI*2);ctx.fill();
-const fs=M.fit(ctx,P.text,W*.82,W*.18);
-M.text(ctx,P.text,cx,cy+W*.03,fs*e,{color:P.pal.fg,glow:P.pal.acc,spacing:6});
-const bw=W*.36*M.ease.outExpo(M.p(ts,.3,.55));
-ctx.fillStyle=P.pal.acc2;ctx.fillRect(cx-bw/2,cy+W*.18,bw,4);`,
+      agentId: 2,
+      fileName: 'cena_06_closing.js',
+      compileMs: 5,
+      code: `const cx=W*.5,cy=H*.36,e=M.ease.outExpo(M.p(ts,0,.8));
+// Interface premium ao fundo com grid luminoso
+const pw=W*.9*e,ph=H*.54*e,px=(W-pw)/2,py=H*.14;
+ctx.fillStyle=M.col(P.pal.bg2,.82);M.rrect(ctx,px,py,pw,ph,24);ctx.fill();
+ctx.strokeStyle=M.col(P.pal.acc,.65);ctx.lineWidth=3;ctx.stroke();
+for(let r=1;r<5;r++){
+  ctx.strokeStyle=M.col(P.pal.acc2,.12);ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(px+20,py+r*(ph/5));ctx.lineTo(px+pw-20,py+r*(ph/5));ctx.stroke();
+}
+// Badge superior ELITE
+const bw=W*.44*e,bh=38;
+ctx.fillStyle=M.col(P.pal.acc,.2);M.rrect(ctx,cx-bw/2,py+28,bw,bh,19);ctx.fill();
+ctx.strokeStyle=P.pal.acc;ctx.lineWidth=2;ctx.stroke();
+M.text(ctx,'SUA IDEIA · SEU CÓDIGO',cx,py+47,18*e,{color:P.pal.acc,weight:800});
+// Nome do curso em destaque
+const L=M.lines(P.text,14),fs=M.fit(ctx,'FORMAÇÃO MINI',W*.84,W*.13);
+L.forEach((l,i)=>{
+  const st=M.ease.outBack(M.stagger(ts,i,.06,.09,.45));
+  M.text(ctx,l,cx,H*.34+i*fs*1.15,fs*st*(1+P.pulse*.04),{
+    color:i===L.length-1?P.pal.acc:P.pal.fg,
+    glow:P.pal.acc2
+  });
+});
+// Call to action pulsante
+const ctaW=W*.72*M.ease.outBack(M.p(ts,.25,.5)),ctaH=56,ctaY=H*.56;
+ctx.fillStyle=P.pal.acc;M.rrect(ctx,cx-ctaW/2,ctaY,ctaW,ctaH,16);ctx.fill();
+M.text(ctx,'ACESSE O LINK AGORA',cx,ctaY+ctaH/2,24*e,{color:P.pal.bg1,weight:900,shadow:false});`,
     },
   ],
 };
+
