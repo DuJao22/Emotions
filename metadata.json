@@ -1,0 +1,6 @@
+{
+  "name": "Kinetix Showreel Studio",
+  "description": "Estúdio mobile-first de alta performance e baixa latência para geração, edição em tempo real e gravação de showreels 9:16 em Canvas 2D com Gemini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
