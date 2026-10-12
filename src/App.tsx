@@ -1004,7 +1004,7 @@ export default function App() {
             {data.title}
           </b>
           <span className="px-1.5 py-0.5 rounded bg-[#00f5a0]/15 border border-[#00f5a0]/40 text-[#00f5a0] font-mono text-[10px] font-semibold shrink-0">
-            v3.0 Direto
+            v3.1 Direto
           </span>
           <span className="opacity-75 font-mono text-[11px] sm:text-xs tabular-nums truncate">
             {recording ? '● GRAVANDO  ' : ''}

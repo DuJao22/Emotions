@@ -1,14 +1,12 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { synthesizeConnectedSceneCode } from './src/engine/motionEngine.ts';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = process.cwd();
 
 const OUTPUT_DIR = path.join(__dirname, '.data');
 if (!fs.existsSync(OUTPUT_DIR)) {
