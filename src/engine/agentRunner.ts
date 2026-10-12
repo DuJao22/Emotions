@@ -130,16 +130,98 @@ function safeParseJson<T = Record<string, unknown>>(raw: string): T | null {
   }
 }
 
-export function extrairChavesLocal(key1?: string, key2?: string): string[] {
+const memChavesEngrenagem: { key1: string; key2: string } = {
+  key1: '',
+  key2: '',
+};
+
+export function limparChaveEngrenagem(raw?: string | null): string {
+  if (!raw || typeof raw !== 'string') return '';
+  const cleaned = raw
+    .trim()
+    .replace(/^(?:export\s+)?(?:VITE_)?(?:GEMINI|GOOGLE)_?API_?KEY(?:_[12])?\s*=\s*/i, '')
+    .replace(/^['"`]+|['"`]+$/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+  if (
+    !cleaned ||
+    cleaned === 'MY_GEMINI_API_KEY' ||
+    cleaned === 'YOUR_API_KEY' ||
+    cleaned === 'undefined' ||
+    cleaned === 'null' ||
+    cleaned.length < 12
+  ) {
+    return '';
+  }
+  return cleaned;
+}
+
+export function lerChavesPadraoEngrenagem(): { key1: string; key2: string } {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const s1 = limparChaveEngrenagem(
+        localStorage.getItem('GEMINI_API_KEY_1') || localStorage.getItem('GEMINI_API_KEY')
+      );
+      const s2 = limparChaveEngrenagem(localStorage.getItem('GEMINI_API_KEY_2'));
+      if (s1) memChavesEngrenagem.key1 = s1;
+      if (s2) memChavesEngrenagem.key2 = s2;
+    }
+  } catch {
+    // ignore storage restriction
+  }
+  return {
+    key1: memChavesEngrenagem.key1,
+    key2: memChavesEngrenagem.key2,
+  };
+}
+
+export function fixarChavesPadraoEngrenagem(
+  rawKey1?: string,
+  rawKey2?: string
+): { key1: string; key2: string; chaves: string[] } {
+  const k1 = limparChaveEngrenagem(rawKey1);
+  const k2 = limparChaveEngrenagem(rawKey2);
+  memChavesEngrenagem.key1 = k1;
+  memChavesEngrenagem.key2 = k2;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('GEMINI_API_KEY_1', k1);
+      localStorage.setItem('GEMINI_API_KEY_2', k2);
+      if (k1) {
+        localStorage.setItem('GEMINI_API_KEY', k1);
+      }
+    }
+  } catch {
+    // ignore storage restriction
+  }
   const chaves: string[] = [];
-  for (const k of [key1 || '', key2 || '']) {
-    const clean = k.trim();
-    if (clean && clean !== 'MY_GEMINI_API_KEY' && !chaves.includes(clean)) {
-      chaves.push(clean);
+  for (const k of [k1, k2]) {
+    if (k && !chaves.includes(k)) {
+      chaves.push(k);
+    }
+  }
+  return { key1: k1, key2: k2, chaves };
+}
+
+export function extrairChavesLocal(key1?: string, key2?: string): string[] {
+  const padrao = lerChavesPadraoEngrenagem();
+  const k1 = limparChaveEngrenagem(key1) || padrao.key1;
+  const k2 = limparChaveEngrenagem(key2) || padrao.key2;
+
+  // Sempre mantém as chaves da engrenagem fixadas como padrão ativo
+  if (k1 !== padrao.key1 || k2 !== padrao.key2) {
+    fixarChavesPadraoEngrenagem(k1, k2);
+  }
+
+  const chaves: string[] = [];
+  for (const k of [k1, k2]) {
+    if (k && !chaves.includes(k)) {
+      chaves.push(k);
     }
   }
   return chaves;
 }
+
 
 const PREFERRED_MODELS = [
   'gemini-2.5-flash',

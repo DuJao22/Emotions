@@ -157,12 +157,74 @@ function make_seed_dna(prompt: string, runs: Array<Record<string, unknown>>) {
   };
 }
 
+function safeParseServerJson<T = Record<string, unknown>>(raw: string): T | null {
+  const t = String(raw || '')
+    .replace(/```(?:json)?/gi, '')
+    .replace(/```/g, '')
+    .trim();
+  if (!t) return null;
+  const i0 = t.indexOf('{');
+  const i1 = t.lastIndexOf('}');
+  const candidate = i0 >= 0 && i1 > i0 ? t.slice(i0, i1 + 1) : t;
+  try {
+    return JSON.parse(candidate) as T;
+  } catch {
+    return null;
+  }
+}
+
+let fixedGearKey1 = '';
+let fixedGearKey2 = '';
+
+function cleanGearKey(raw?: string): string {
+  if (!raw || typeof raw !== 'string') return '';
+  const cleaned = raw
+    .trim()
+    .replace(/^(?:export\s+)?(?:VITE_)?(?:GEMINI|GOOGLE)_?API_?KEY(?:_[12])?\s*=\s*/i, '')
+    .replace(/^['"`]+|['"`]+$/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+  if (
+    !cleaned ||
+    cleaned === 'MY_GEMINI_API_KEY' ||
+    cleaned === 'YOUR_API_KEY' ||
+    cleaned === 'undefined' ||
+    cleaned === 'null' ||
+    cleaned.length < 12
+  ) {
+    return '';
+  }
+  return cleaned;
+}
+
 function extrairChaves(key1?: string, key2?: string): string[] {
-  const k1 = (key1 || process.env.GEMINI_API_KEY_1 || process.env.GEMINI_API_KEY || '').trim();
-  const k2 = (key2 || process.env.GEMINI_API_KEY_2 || '').trim();
+  const saved = ler_json<{ key1?: string; key2?: string }>('chaves_engrenagem.json', {});
+  const in1 = cleanGearKey(key1);
+  const in2 = cleanGearKey(key2);
+
+  if (in1) fixedGearKey1 = in1;
+  if (in2) fixedGearKey2 = in2;
+  if (in1 || in2) {
+    gravar_json('chaves_engrenagem.json', {
+      key1: fixedGearKey1 || cleanGearKey(saved.key1),
+      key2: fixedGearKey2 || cleanGearKey(saved.key2),
+    });
+  }
+
+  const k1 =
+    in1 ||
+    fixedGearKey1 ||
+    cleanGearKey(saved.key1) ||
+    cleanGearKey(process.env.GEMINI_API_KEY_1 || process.env.GEMINI_API_KEY);
+  const k2 =
+    in2 ||
+    fixedGearKey2 ||
+    cleanGearKey(saved.key2) ||
+    cleanGearKey(process.env.GEMINI_API_KEY_2);
+
   const chaves: string[] = [];
   for (const k of [k1, k2]) {
-    if (k && k !== 'MY_GEMINI_API_KEY' && !chaves.includes(k)) {
+    if (k && !chaves.includes(k)) {
       chaves.push(k);
     }
   }
@@ -194,10 +256,11 @@ async function descobrir_modelos(chave0: string): Promise<{ models: string[]; lo
         logs.push(`  (não consegui listar os modelos: HTTP ${resp.status})`);
         break;
       }
-      const data = (await resp.json()) as {
+      const data = safeParseServerJson<{
         models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
         nextPageToken?: string;
-      };
+      }>(await resp.text());
+      if (!data) break;
       for (const m of data.models || []) {
         const nome = String(m.name || '').split('/').pop() || '';
         const methods = m.supportedGenerationMethods || [];
@@ -389,12 +452,12 @@ async function geminiCall(options: {
         return { text: null, logs };
       }
 
-      const data = (await resp.json()) as {
+      const data = safeParseServerJson<{
         candidates?: Array<{
           content?: { parts?: Array<{ text?: string; thought?: boolean }> };
         }>;
-      };
-      const parts = data.candidates?.[0]?.content?.parts || [];
+      }>(await resp.text());
+      const parts = data?.candidates?.[0]?.content?.parts || [];
       const txt = parts
         .filter((p) => !p.thought)
         .map((p) => p.text || '')
@@ -1174,9 +1237,11 @@ Responda APENAS em JSON: {"approved": true, "note": "comentário curto de 1 fras
           });
 
           if (resp.ok) {
-            const data = await resp.json();
-            const txt = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            const parsed = JSON.parse(txt.trim());
+            const data = safeParseServerJson<{
+              candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+            }>(await resp.text());
+            const txt = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            const parsed = safeParseServerJson<{ approved?: boolean; note?: string }>(txt);
             if (parsed && parsed.approved !== false) {
               logs.push(
                 `  👁️ Agente ${agentNum} inspecionou ${fileName}: APROVADA ("${
@@ -1320,7 +1385,11 @@ Escreva SOMENTE o corpo da função JavaScript (sem markdown, sem explicações)
         });
 
         if (resp.ok) {
-          const data = await resp.json();
+          const data = safeParseServerJson<{
+            candidates?: Array<{
+              content?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> };
+            }>;
+          }>(await resp.text());
           const inline = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
           if (inline?.data) {
             return res.json({

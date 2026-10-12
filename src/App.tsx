@@ -44,7 +44,11 @@ import {
 import { ShowreelAudioSynth } from './engine/audioSynth';
 import {
   descobrirModelosLocal,
+  extrairChavesLocal,
+  fixarChavesPadraoEngrenagem,
   gerarPlanoLocal,
+  lerChavesPadraoEngrenagem,
+  limparChaveEngrenagem,
   pedirCenaLocal,
   revisarCenaLocal,
   sintetizarVozCenaLocal,
@@ -58,23 +62,10 @@ interface CompiledScene extends SceneSpec {
 
 const TR = 0.32;
 
-declare const __ENV_GEMINI_KEY_1__: string | undefined;
-declare const __ENV_GEMINI_KEY_2__: string | undefined;
-
 export default function App() {
-  // ====================== CONFIGURAÇÃO (Persistida no navegador + Env Fallback) ======================
-  const [key1, setKey1] = useState<string>(
-    () =>
-      localStorage.getItem('GEMINI_API_KEY_1') ||
-      (typeof __ENV_GEMINI_KEY_1__ !== 'undefined' ? __ENV_GEMINI_KEY_1__ : '') ||
-      ''
-  );
-  const [key2, setKey2] = useState<string>(
-    () =>
-      localStorage.getItem('GEMINI_API_KEY_2') ||
-      (typeof __ENV_GEMINI_KEY_2__ !== 'undefined' ? __ENV_GEMINI_KEY_2__ : '') ||
-      ''
-  );
+  // ====================== CONFIGURAÇÃO PADRÃO FIXA NA ENGRENAGEM ⚙️ (Sem depender de variáveis de ambiente) ======================
+  const [key1, setKey1] = useState<string>(() => lerChavesPadraoEngrenagem().key1);
+  const [key2, setKey2] = useState<string>(() => lerChavesPadraoEngrenagem().key2);
   const [geminiModel, setGeminiModel] = useState<string>(
     () => localStorage.getItem('GEMINI_MODEL') || 'auto'
   );
@@ -166,23 +157,24 @@ export default function App() {
     setLogs((prev) => [...prev, ...lines]);
   }, []);
 
-  const saveSettings = () => {
-    localStorage.setItem('GEMINI_API_KEY_1', key1.trim());
-    localStorage.setItem('GEMINI_API_KEY_2', key2.trim());
-    localStorage.setItem('GEMINI_MODEL', geminiModel.trim() || 'auto');
-    localStorage.setItem('VOICE_NAME', voiceName);
-    localStorage.setItem('DURATION', String(durationConfig));
-    localStorage.setItem('RES_CONFIG', resConfig);
-    localStorage.setItem('REAPROVEITAR', String(reaproveitarConfig));
-    localStorage.setItem('PAUSA_ENTRE_CHAMADAS', String(pausaConfig));
-    setSettingsOpen(false);
+  const handleKey1Input = (rawVal: string) => {
+    const clean = limparChaveEngrenagem(rawVal);
+    setKey1(clean || rawVal.trim());
+    fixarChavesPadraoEngrenagem(clean || rawVal.trim(), key2);
+  };
+
+  const handleKey2Input = (rawVal: string) => {
+    const clean = limparChaveEngrenagem(rawVal);
+    setKey2(clean || rawVal.trim());
+    fixarChavesPadraoEngrenagem(key1, clean || rawVal.trim());
   };
 
   // Discover models directly from Gemini REST API in browser (compatível 100% com Vercel, Render e Mobile)
   const handleDiscoverModels = async () => {
     setDiscoveringModels(true);
     try {
-      const out = await descobrirModelosLocal(key1.trim(), key2.trim(), geminiModel);
+      const fixed = fixarChavesPadraoEngrenagem(key1, key2);
+      const out = await descobrirModelosLocal(fixed.key1, fixed.key2, geminiModel);
       if (Array.isArray(out.modelos)) {
         setDiscoveredModels(out.modelos);
       }
@@ -196,7 +188,7 @@ export default function App() {
     }
   };
 
-  // Initialize Audio Synth & Render Keep-Alive Heartbeat + Run initial local visual inspection
+  // Initialize Audio Synth + Run initial local visual inspection
   useEffect(() => {
     audioRef.current = new ShowreelAudioSynth();
     // Run initial visual inspection on preset scenes so snapshots are ready immediately
@@ -218,11 +210,6 @@ export default function App() {
         };
       }),
     }));
-
-    const keepAliveTimer = window.setInterval(() => {
-      fetch('/api/ping').catch(() => {});
-    }, 4 * 60 * 1000);
-    return () => window.clearInterval(keepAliveTimer);
   }, []);
 
   // Fit Canvas to #stage maintaining exact W/H aspect ratio
@@ -686,7 +673,10 @@ export default function App() {
     setIsReviewing(true);
     let workingReel = { ...reelToInspect, scenes: [...reelToInspect.scenes] };
     const total = workingReel.scenes.length;
-    const temChave = Boolean(key1.trim() || key2.trim());
+    const padraoGear = lerChavesPadraoEngrenagem();
+    const activeK1 = limparChaveEngrenagem(key1) || padraoGear.key1;
+    const activeK2 = limparChaveEngrenagem(key2) || padraoGear.key2;
+    const temChave = extrairChavesLocal(activeK1, activeK2).length > 0;
 
     appendLog('\n=== INICIANDO REVISÃO VISUAL DO SHOWREEL (QUADRO A QUADRO) ===');
 
@@ -732,8 +722,8 @@ export default function App() {
           snapshotDataUrl: frameCheck.snapshots[1] || frameCheck.snapshots[0],
           diagnosticReason: frameCheck.diagnosticReason,
           needsRepair,
-          key1: key1.trim(),
-          key2: key2.trim(),
+          key1: activeK1,
+          key2: activeK2,
           modelos,
           mi: currentMi,
         });
@@ -800,13 +790,22 @@ export default function App() {
     return workingReel;
   };
 
-  // ====================== FLUXO MULTI-AGENTE COMPLETO (Roteiro -> Agente 1/2 por Cena -> Revisão Visual -> União Final) ======================
-  const handleRunAgent = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  // ====================== FLUXO MULTI-AGENTE COMPLETO (100% pelas Chaves Fixadas na Engrenagem ⚙️) ======================
+  const runAgentWithKeys = async (overrideKey1?: string, overrideKey2?: string) => {
     if (isGenerating || isReviewing) return;
 
     // Desbloqueia imediatamente o AudioContext durante o clique/toque do usuário (essencial no Chrome Mobile)
     void audioRef.current?.resume();
+
+    // Fixa e lê as chaves diretamente do padrão da Engrenagem (sem precisar de variável de ambiente)
+    const fixed = fixarChavesPadraoEngrenagem(
+      overrideKey1 !== undefined ? overrideKey1 : key1,
+      overrideKey2 !== undefined ? overrideKey2 : key2
+    );
+    const activeK1 = fixed.key1;
+    const activeK2 = fixed.key2;
+    setKey1(activeK1);
+    setKey2(activeK2);
 
     setIsGenerating(true);
     abortGenRef.current = false;
@@ -815,15 +814,24 @@ export default function App() {
 
     const shortPromptPreview =
       userPrompt.length > 100 ? `${userPrompt.slice(0, 100)}...` : userPrompt;
-    setLogs([`Iniciando Pipeline Multi-Agente para: "${shortPromptPreview}"`]);
+    setLogs([
+      `Iniciando Pipeline Multi-Agente para: "${shortPromptPreview}"`,
+      fixed.chaves.length > 0
+        ? `✓ Usando ${fixed.chaves.length} chave(s) fixada(s) como padrão na Engrenagem ⚙️ (sem precisar de variáveis de ambiente).`
+        : `⚠️ Nenhuma chave configurada na Engrenagem ⚙️ — abrindo painel para você colar as Chaves 1 e 2.`,
+    ]);
     setGenProgressLabel('Roteirizando showreel...');
 
+    if (fixed.chaves.length === 0) {
+      setSettingsOpen(true);
+    }
+
     try {
-      // Etapa 1: Criar Roteiro 100% Direto no Navegador (sem depender de serverless/proxy)
+      // Etapa 1: Criar Roteiro 100% Direto usando as chaves fixadas na Engrenagem
       const planData = await gerarPlanoLocal({
         prompt: userPrompt,
-        key1: key1.trim(),
-        key2: key2.trim(),
+        key1: activeK1,
+        key2: activeK2,
         geminiModel: geminiModel.trim() || 'auto',
         duration: durationConfig,
         width: W,
@@ -896,8 +904,8 @@ export default function App() {
             proximaIdeia,
             width: W,
             height: H,
-            key1: key1.trim(),
-            key2: key2.trim(),
+            key1: activeK1,
+            key2: activeK2,
             modelos,
             mi: currentMi,
           });
@@ -940,8 +948,8 @@ export default function App() {
                 text: spokenText,
                 idx: sceneIdx,
                 voiceName,
-                key1: key1.trim(),
-                key2: key2.trim(),
+                key1: activeK1,
+                key2: activeK2,
               });
               if (ttsOut?.audioBase64) {
                 setData((prev) => ({
@@ -978,7 +986,7 @@ export default function App() {
       } else {
         await runVisualInspectionPass(currentReel, modelos, currentMi);
         appendLog(
-          `\n⚠️ Modo offline concluído: clique no botão de ⚙️ Engrenagem no topo da tela para colar suas Chaves 1 e 2 da Gemini neste navegador!`
+          `\n⚠️ Cole suas 2 Chaves Gemini na ⚙️ Engrenagem: assim que você salvar as chaves lá, elas ficam fixadas como padrão e colocam a IA em funcionamento automaticamente!`
         );
       }
     } catch (err) {
@@ -990,9 +998,41 @@ export default function App() {
     }
   };
 
+  const handleRunAgent = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    await runAgentWithKeys(key1, key2);
+  };
+
+  const saveSettings = (forceStartAi = false) => {
+    const fixed = fixarChavesPadraoEngrenagem(key1, key2);
+    setKey1(fixed.key1);
+    setKey2(fixed.key2);
+    try {
+      localStorage.setItem('GEMINI_MODEL', geminiModel.trim() || 'auto');
+      localStorage.setItem('VOICE_NAME', voiceName);
+      localStorage.setItem('DURATION', String(durationConfig));
+      localStorage.setItem('RES_CONFIG', resConfig);
+      localStorage.setItem('REAPROVEITAR', String(reaproveitarConfig));
+      localStorage.setItem('PAUSA_ENTRE_CHAMADAS', String(pausaConfig));
+    } catch {
+      // ignore storage restriction
+    }
+    setSettingsOpen(false);
+
+    if (fixed.chaves.length > 0) {
+      appendLog(
+        `✓ Chaves da Engrenagem ⚙️ fixadas como padrão (${fixed.chaves.length} chave(s) pronta(s) — sem necessidade de variáveis de ambiente).`
+      );
+      const needsInitialAiRun = data.scenes.every((s) => s.origem !== 'gemini');
+      if ((forceStartAi || needsInitialAiRun) && !isGenerating && !isReviewing) {
+        void runAgentWithKeys(fixed.key1, fixed.key2);
+      }
+    }
+  };
+
   const activeScene =
     compiledScenesRef.current[currentSceneIdx] || data.scenes[currentSceneIdx] || data.scenes[0];
-  const configuredKeysCount = [key1.trim(), key2.trim()].filter(Boolean).length;
+  const configuredKeysCount = extrairChavesLocal(key1, key2).length;
   const activeAgentNum = ((currentSceneIdx % 2) + 1) as 1 | 2;
 
   return (
@@ -1004,7 +1044,7 @@ export default function App() {
             {data.title}
           </b>
           <span className="px-1.5 py-0.5 rounded bg-[#00f5a0]/15 border border-[#00f5a0]/40 text-[#00f5a0] font-mono text-[10px] font-semibold shrink-0">
-            v3.1 Direto
+            ⚙️ Padrão Fixo
           </span>
           <span className="opacity-75 font-mono text-[11px] sm:text-xs tabular-nums truncate">
             {recording ? '● GRAVANDO  ' : ''}
@@ -1017,16 +1057,20 @@ export default function App() {
         <button
           type="button"
           onClick={() => setSettingsOpen(true)}
-          title="Configurar Chave 1 (Agente 1) e Chave 2 (Agente 2)"
-          className="min-h-[40px] px-3 rounded-xl bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-xs font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform shrink-0"
+          title="Configurar e fixar Chave 1 (Agente 1) e Chave 2 (Agente 2) como padrão"
+          className={`min-h-[40px] px-3 rounded-xl border text-xs font-medium text-white flex items-center gap-1.5 active:scale-95 transition-transform shrink-0 ${
+            configuredKeysCount > 0
+              ? 'bg-[#1b1b28] hover:bg-[#252538] border-[#00f5a0]/50'
+              : 'bg-[#e11d48]/20 hover:bg-[#e11d48]/30 border-[#e11d48]'
+          }`}
         >
           <Settings className="w-4 h-4 text-[#e11d48]" />
           <span>
             {configuredKeysCount === 2
-              ? '2 Agentes Ativos'
+              ? '2 Chaves Padrão Ativas'
               : configuredKeysCount === 1
-              ? '1 Chave Ativa'
-              : 'Chaves API'}
+              ? '1 Chave Padrão Ativa'
+              : 'Configurar Chaves ⚙️'}
           </span>
         </button>
       </header>
@@ -1490,6 +1534,11 @@ export default function App() {
               </button>
             </div>
 
+            {/* Aviso de Padrão Fixo na Engrenagem (Sem precisar de Variável de Ambiente) */}
+            <div className="p-3 rounded-xl bg-[#00f5a0]/10 border border-[#00f5a0]/30 text-[11px] text-white/90 leading-relaxed">
+              <b className="text-[#00f5a0]">Padrão Fixo na Engrenagem ⚙️:</b> Assim que você colar as 2 chaves abaixo, elas ficam salvas e fixadas como padrão neste aplicativo e colocam a IA em funcionamento imediatamente — <b>sem precisar configurar variáveis de ambiente na Vercel</b>.
+            </div>
+
             {/* Chave 1 -> Agente 1 */}
             <div>
               <label className="block text-xs font-semibold text-white/90 mb-1">
@@ -1499,8 +1548,8 @@ export default function App() {
                 <input
                   type={showKey1 ? 'text' : 'password'}
                   value={key1}
-                  onChange={(e) => setKey1(e.target.value)}
-                  placeholder="Cole aqui a Chave 1 da Gemini"
+                  onChange={(e) => handleKey1Input(e.target.value)}
+                  placeholder="Cole aqui a Chave 1 da Gemini (AIza...)"
                   className="w-full h-11 pl-3.5 pr-10 rounded-xl bg-[#07070b] border border-[#2c2c42] focus:border-[#e11d48] focus:outline-none font-mono text-xs text-white"
                 />
                 <button
@@ -1522,8 +1571,8 @@ export default function App() {
                 <input
                   type={showKey2 ? 'text' : 'password'}
                   value={key2}
-                  onChange={(e) => setKey2(e.target.value)}
-                  placeholder="Cole aqui a Chave 2 da Gemini"
+                  onChange={(e) => handleKey2Input(e.target.value)}
+                  placeholder="Cole aqui a Chave 2 da Gemini (AIza...)"
                   className="w-full h-11 pl-3.5 pr-10 rounded-xl bg-[#07070b] border border-[#2c2c42] focus:border-[#e11d48] focus:outline-none font-mono text-xs text-white"
                 />
                 <button
@@ -1675,14 +1724,22 @@ export default function App() {
               </div>
             </div>
 
-            <div className="pt-2 flex items-center justify-end gap-2">
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={saveSettings}
-                className="w-full h-11 rounded-xl bg-[#e11d48] hover:bg-[#be123c] text-sm font-semibold text-white flex items-center justify-center gap-1.5"
+                onClick={() => saveSettings(false)}
+                className="w-full sm:w-auto px-4 h-11 rounded-xl bg-[#1b1b28] hover:bg-[#252538] border border-[#33334a] text-xs sm:text-sm font-medium text-white flex items-center justify-center gap-1.5"
               >
-                <Check className="w-4 h-4" />
-                <span>Salvar Configurações</span>
+                <Check className="w-4 h-4 text-[#00f5a0]" />
+                <span>Fixar como Padrão</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => saveSettings(true)}
+                className="w-full sm:flex-1 h-11 rounded-xl bg-[#e11d48] hover:bg-[#be123c] text-xs sm:text-sm font-semibold text-white flex items-center justify-center gap-1.5"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Fixar Padrão & Colocar IA em Funcionamento</span>
               </button>
             </div>
           </div>

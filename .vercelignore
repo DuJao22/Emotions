@@ -3,3 +3,9 @@ requirements.txt
 *.py
 .data/
 .data
+server.ts
+server.js
+bun.lock
+Procfile
+render.yaml
+
